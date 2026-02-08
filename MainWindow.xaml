@@ -214,7 +214,7 @@
                         <Border Background="#2D2D2D" CornerRadius="8,8,0,0" Padding="10,5">
                             <TextBlock Text=">_ System Log" Foreground="#AAA" FontFamily="Consolas" FontWeight="Bold"/>
                         </Border>
-                        <ListBox Grid.Row="1" ItemsSource="{Binding Logs}" Background="Transparent" BorderThickness="0" ScrollViewer.VerticalScrollBarVisibility="Auto" Margin="5" x:Name="LogListBox">
+                        <ListBox Grid.Row="1" ItemsSource="{Binding Logs}" Background="Transparent" BorderThickness="0" ScrollViewer.VerticalScrollBarVisibility="Hidden" Margin="5" x:Name="LogListBox">
                             <ListBox.ItemContainerStyle>
                                 <Style TargetType="ListBoxItem">
                                     <Setter Property="Template">

@@ -209,12 +209,16 @@ namespace TaskSchedulerApp
             SaveConfigCommand = new RelayCommand(SaveConfig);
             OpenSettingsCommand = new RelayCommand(() => new AdvancedSettingsWindow(Settings).ShowDialog());
             OpenAboutCommand = new RelayCommand(OpenAbout);
+
             AddTaskCommand = new RelayCommand(() => { Settings.TaskList.Add(new TaskItem { Name = "新任务" }); SaveConfig(); });
             RemoveTaskCommand = new RelayCommand(() => { if (SelectedTask != null) { Settings.TaskList.Remove(SelectedTask); SaveConfig(); } });
             MoveUpCommand = new RelayCommand(() => { if (SelectedTask != null && Settings.TaskList.IndexOf(SelectedTask) > 0) { Settings.TaskList.Move(Settings.TaskList.IndexOf(SelectedTask), Settings.TaskList.IndexOf(SelectedTask) - 1); SaveConfig(); } });
             MoveDownCommand = new RelayCommand(() => { if (SelectedTask != null && Settings.TaskList.IndexOf(SelectedTask) < Settings.TaskList.Count - 1) { Settings.TaskList.Move(Settings.TaskList.IndexOf(SelectedTask), Settings.TaskList.IndexOf(SelectedTask) + 1); SaveConfig(); } });
+
             BrowseFileCommand = new RelayCommand(BrowseFile);
+            // 新增：浏览额外文件
             BrowseExtraFileCommand = new RelayCommand(BrowseExtraFile);
+
             StartTaskCommand = new RelayCommand(StartTasks);
             StopTaskCommand = new RelayCommand(() => { try { _runner?.RequestStop(); } catch (Exception ex) { Log("错误", ex.Message); } });
             TestClickCommand = new RelayCommand(() => { if (SelectedTask != null) NativeMethods.ClickLeft(SelectedTask.PosX, SelectedTask.PosY); });
@@ -234,17 +238,8 @@ namespace TaskSchedulerApp
         }
         private void SaveConfig()
         {
-            try
-            {
-                string json = JsonConvert.SerializeObject(Settings, Formatting.Indented);
-                File.WriteAllText("config.json", json);
-
-                Log("系统", "配置已保存");
-            }
-            catch (Exception ex)
-            {
-                Log("错误", "保存失败: " + ex.Message);
-            }
+            try { string json = JsonConvert.SerializeObject(Settings, Formatting.Indented); File.WriteAllText("config.json", json); }
+            catch (Exception ex) { Log("错误", "保存失败: " + ex.Message); }
         }
 
         private void BrowseFile()

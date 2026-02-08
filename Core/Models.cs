@@ -45,6 +45,7 @@ namespace TaskSchedulerApp.Models
         public int PosX { get => posX; set { posX = value; OnPropertyChanged(); } }
         public int PosY { get => posY; set { posY = value; OnPropertyChanged(); } }
         public string Status { get => status; set { status = value; OnPropertyChanged(); } }
+
         public string ExtraStartPath { get => extraStartPath; set { extraStartPath = value; OnPropertyChanged(); } }
         public string ExtraStartArguments { get => extraStartArguments; set { extraStartArguments = value; OnPropertyChanged(); } }
         public bool IsZombieCheckEnabled { get => isZombieCheckEnabled; set { isZombieCheckEnabled = value; OnPropertyChanged(); } }
@@ -66,6 +67,7 @@ namespace TaskSchedulerApp.Models
         public double MiniLogHeight { get; set; } = 220;
         public double MiniLogTop { get; set; } = -1;
         public double MiniLogLeft { get; set; } = -1;
+
         public string BarkUrl { get => barkUrl; set { barkUrl = value; OnPropertyChanged(); } }
         public string BarkIcon { get => barkIcon; set { barkIcon = value; OnPropertyChanged(); } }
         public string ScreenshotPath { get => screenshotPath; set { screenshotPath = value; OnPropertyChanged(); } }

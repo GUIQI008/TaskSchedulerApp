@@ -5,6 +5,7 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Net.Http;
+using System.Drawing.Imaging;
 using TaskSchedulerApp.Core;
 using TaskSchedulerApp.Models;
 
@@ -16,6 +17,7 @@ namespace TaskSchedulerApp.Services
         private readonly AppSettings _settings;
         private volatile bool _stopRequested = false;
         private static readonly HttpClient _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+        private int _currentTaskId = -1;
         private readonly object _logLock = new object();
         private IntPtr lastLoggedHwnd = IntPtr.Zero;
         private double lastLoggedStagnantMinutes = 0;
@@ -30,9 +32,10 @@ namespace TaskSchedulerApp.Services
             CleanOldScreenshots();
         }
 
+        public void SetCurrentTaskId(int id) => _currentTaskId = id;
         public void RequestStop() => _stopRequested = true;
 
-        #region 日志与文件清理
+        //日志与清理
         private void Log(string type, string message)
         {
             _uiLogAction?.Invoke(type, message);
@@ -72,50 +75,44 @@ namespace TaskSchedulerApp.Services
                     {
                         if (new FileInfo(file).CreationTime < DateTime.Now.AddHours(-24))
                             File.Delete(file);
-                    }
-                }
-            }
-            catch { }
-        });
-        #endregion
+        }
+        private void CleanOldLogs() { Task.Run(() => { try { if (Directory.Exists(_settings.LogPath)) foreach (var f in Directory.GetFiles(_settings.LogPath, "*.log")) if (new FileInfo(f).CreationTime < DateTime.Now.AddHours(-24)) File.Delete(f); } catch { } }); }
+        private void CleanOldScreenshots() { Task.Run(() => { try { if (Directory.Exists(_settings.ScreenshotPath)) foreach (var f in Directory.GetFiles(_settings.ScreenshotPath)) if (new FileInfo(f).CreationTime < DateTime.Now.AddHours(-24)) File.Delete(f); } catch { } }); }
 
-        #region 任务队列执行
+        //队列运行
         public async Task RunAllTasks(TaskItem? startFrom = null)
         {
             _stopRequested = false;
-            Log("系统", "=== 开始执行任务队列 ===");
+            Log("系统", "开始执行任务列表...");
             int total = _settings.TaskList.Count;
             int startIdx = startFrom != null ? Math.Max(0, _settings.TaskList.IndexOf(startFrom)) : 0;
 
             for (int i = startIdx; i < total; i++)
             {
-                if (_stopRequested) { Log("系统", "收到停止指令，中断队列执行"); break; }
-
+                if (_stopRequested) { Log("系统", "停止指令已接收，停止队列。"); break; }
                 var task = _settings.TaskList[i];
-                Log("系统", $">>> 执行任务 {i + 1}/{total}: {task.Name}");
+                Log("系统", $">>> 任务 {i + 1}/{total}: {task.Name}");
 
                 await RunSingleTask(task);
 
                 if (!_stopRequested && i < total - 1)
                 {
-                    Log("系统", "任务间隔：等待 5 秒...");
+                    Log("系统", "等待 5 秒后执行下一任务...");
                     await Task.Delay(5000);
                 }
             }
-
-            if (!_stopRequested)
-            {
-                Log("系统", "=== 所有任务执行完成 ===");
-                PerformPostCompletionAction();
-            }
+            if (!_stopRequested) { Log("系统", "全部任务完成。"); PerformPostCompletionAction(); }
+            else Log("系统", "任务循环已停止。");
+        }
         }
         #endregion
 
-        #region 单任务核心执行逻辑
+        //单任务逻辑
         public async Task RunSingleTask(TaskItem task)
         {
             Bitmap? lastScreenSample = null;
             DateTime lastScreenChangeTime = DateTime.Now;
+            _currentTaskId = -1;
 
             try
             {
@@ -123,85 +120,70 @@ namespace TaskSchedulerApp.Services
                 CleanOldScreenshots();
                 await SendBark(task.Name, "启动中...");
 
-                #region 额外启动程序
+                //额外启动
                 if (!string.IsNullOrWhiteSpace(task.ExtraStartPath) && File.Exists(task.ExtraStartPath))
                 {
-                    Log("系统", $"执行额外启动程序: {task.ExtraStartPath} {task.ExtraStartArguments}");
+                    Log("系统", $"执行额外启动: {Path.GetFileName(task.ExtraStartPath)}");
                     try
                     {
-                        var psi = new ProcessStartInfo
-                        {
-                            FileName = task.ExtraStartPath,
-                            Arguments = task.ExtraStartArguments,
-                            UseShellExecute = true,
-                            WorkingDirectory = Path.GetDirectoryName(task.ExtraStartPath) ?? ""
-                        };
-                        using var process = Process.Start(psi);
-                        if (process != null)
-                            Log("系统", $"额外程序启动成功，PID: {process.Id}");
+                        var extraPsi = new ProcessStartInfo { FileName = task.ExtraStartPath, Arguments = task.ExtraStartArguments, UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(task.ExtraStartPath) ?? "" };
+                        Process.Start(extraPsi);
                         await Task.Delay(2000);
                     }
-                    catch (Exception ex) { Log("警告", $"额外启动失败: {ex.Message}"); }
+                    catch (Exception ex) { Log("警告", $"额外启动出错: {ex.Message}"); }
                 }
                 #endregion
 
-                #region 启动主程序并捕获进程信息
-                var (launchSuccess, mainProcess) = await AttemptLaunch(task);
-
-                if (!launchSuccess)
+                //启动主程序
+                if (!await AttemptLaunch(task))
                 {
-                    Log("错误", $"{task.Name} 启动失败（窗口/进程未检测到），跳过任务");
+                    Log("错误", $"{task.Name} 启动失败 (未检测到窗口或进程)。跳过。");
                     KillRelatedProcesses(task);
                     task.Status = "启动失败";
                     return;
                 }
 
-                Log("任务", mainProcess != null
-                    ? $"主程序启动成功，PID: {mainProcess.Id}，进程名: {mainProcess.ProcessName}"
-                    : "主程序启动成功（通过窗口检测确认，未捕获进程对象）");
-                #endregion
-
-                Log("任务", "等待 3 秒窗口稳定...");
+                Log("任务", "启动成功，等待3秒稳定...");
                 await Task.Delay(3000);
 
+                //模拟点击
                 if (task.PosX != 0 || task.PosY != 0)
                 {
-                    Log("操作", $"模拟点击坐标: ({task.PosX}, {task.PosY})");
+                    Log("操作", $"执行点击: ({task.PosX}, {task.PosY})");
                     NativeMethods.ClickLeft(task.PosX, task.PosY);
                 }
 
                 task.Status = "运行中";
-                Log("任务", $"开始监控运行，时长: {task.RunTime} 分钟");
+                Log("任务", $"开始监控，时长: {task.RunTime}分钟");
                 await SendBark(task.Name, "运行中");
 
                 DateTime endTime = DateTime.Now.AddMinutes(task.RunTime);
+                bool screenshotTaken = false;
                 int missingCounter = 0;
 
-                #region 主监控循环（已防 CPU 100%）
+                //监控循环
                 while (DateTime.Now < endTime && !_stopRequested)
                 {
-                    #region 进程存活检测（增强日志）
-                    var aliveProcesses = GetAliveProcesses(task);
-                    if (aliveProcesses.Count == 0)
+                    // 存活检测
+                    if (!CheckIfTaskIsAlive(task))
                     {
                         missingCounter++;
                         int tolerance = Math.Max(task.RecognitionTimeout, 5);
-                        Log("监控", $"目标进程丢失 ({missingCounter}/{tolerance}s)");
+                        if (missingCounter % 5 == 0 || missingCounter == 1)
+                            Log("监控", $"目标丢失，确认状态中... ({missingCounter}/{tolerance}s)");
 
                         if (missingCounter >= tolerance)
                         {
-                            Log("监控", $"{task.Name} 主进程已退出，任务结束");
+                            Log("监控", $"{task.Name} 主进程退出，任务结束。");
                             KillRelatedProcesses(task);
                             task.Status = "已完成";
-                            await SendBark(task.Name, "运行结束（进程退出）");
+                            await SendBark(task.Name, "运行结束");
                             return;
                         }
                     }
                     else
                     {
-                        if (missingCounter > 0)
-                            Log("监控", $"目标进程恢复，当前存活 PID: {string.Join(", ", aliveProcesses.Select(p => p.Id))}");
-
+                        if (missingCounter > 0) Log("监控", "目标进程已恢复。");
                         missingCounter = 0;
                     }
                     #endregion
@@ -214,230 +196,204 @@ namespace TaskSchedulerApp.Services
                         {
                             string title = GetWindowTitle(zombieHwnd);
 
-                            // 只在首次找到窗口时打印一次（或窗口变化时）
-                            if (lastLoggedHwnd != zombieHwnd)
-                            {
-                                Log("监控", $"僵尸检测目标窗口变更: HWND=0x{zombieHwnd.ToInt64():X}, 标题=\"{title}\"");
-                                lastLoggedHwnd = zombieHwnd;
-                            }
+                        if (zombieHwnd != IntPtr.Zero)
+                        {
+                            NativeMethods.SetForegroundWindow(zombieHwnd);
+                            NativeMethods.SetWindowPos(zombieHwnd, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0,
+                                NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE);
 
-                            using Bitmap? currentSample = GetScreenSample(zombieHwnd);
+                            // 获取截图
+                            Bitmap? currentSample = GetScreenSample(zombieHwnd);
                             if (currentSample != null)
                             {
-                                if (lastScreenSample != null)
+                                if (lastScreenSample != null && AreBitmapsIdentical(lastScreenSample, currentSample))
                                 {
-                                    if (AreBitmapsIdentical(lastScreenSample, currentSample))
+                                    if ((DateTime.Now - lastScreenChangeTime).TotalMinutes >= task.ZombieCheckTimeout)
                                     {
-                                        double stagnantMinutes = (DateTime.Now - lastScreenChangeTime).TotalMinutes;
-
-                                        // 只每整分钟汇报一次未变化（避免每秒刷）
-                                        if (Math.Floor(stagnantMinutes) > lastLoggedStagnantMinutes)
-                                        {
-                                            lastLoggedStagnantMinutes = Math.Floor(stagnantMinutes);
-                                            Log("监控", $"画面未变化，已持续 {stagnantMinutes:F1} 分钟");
-                                        }
-
-                                        if (stagnantMinutes >= task.ZombieCheckTimeout)
-                                        {
-                                            Log("监控", $"画面卡死超过 {task.ZombieCheckTimeout} 分钟（实际 {stagnantMinutes:F1} 分钟），终止任务");
-                                            KillRelatedProcesses(task);
-                                            task.Status = "卡死终止";
-                                            await SendBark(task.Name, "卡死终止");
-                                            return;
-                                        }
-                                    }
-                                    else
-                                    {
-                                        // 画面变化时才打印（关键事件）
-                                        Log("监控", "画面发生变化，重置卡死计时");
-                                        lastScreenChangeTime = DateTime.Now;
-                                        lastLoggedStagnantMinutes = 0;
-
+                                        Log("监控", $"检测到画面卡死 {task.ZombieCheckTimeout} 分钟。终止任务。");
+                                        KillRelatedProcesses(task);
+                                        task.Status = "卡死跳过";
                                         lastScreenSample?.Dispose();
-                                        lastScreenSample = (Bitmap)currentSample.Clone();
+                                        currentSample?.Dispose();
+                                        await SendBark(task.Name, "卡死终止");
+                                        return;
                                     }
                                 }
-                                else
-                                {
-                                    // 首次采样
-                                    Log("监控", "僵尸检测开始采样初始画面");
-                                    lastScreenSample = (Bitmap)currentSample.Clone();
-                                    lastScreenChangeTime = DateTime.Now;
-                                    lastLoggedStagnantMinutes = 0;
-                                }
+                                else lastScreenChangeTime = DateTime.Now;
+
+                                lastScreenSample?.Dispose();
+                                lastScreenSample = currentSample;
                             }
                         }
-                        else if (lastLoggedHwnd != IntPtr.Zero)
-                        {
-                            // 窗口丢失时打印一次
-                            Log("监控", "僵尸检测目标窗口已消失");
-                            lastLoggedHwnd = IntPtr.Zero;
-                            lastLoggedStagnantMinutes = 0;
-                        }
                     }
-                    #endregion
+
+                    //  截图
+                    if ((endTime - DateTime.Now).TotalSeconds <= 60 && !screenshotTaken)
+                    {
+                        TakeScreenshot(task);
+                        screenshotTaken = true;
+                    }
 
                     await Task.Delay(1000);
                 }
-                #endregion
 
-                if (!_stopRequested)
+                if (lastScreenSample != null) lastScreenSample.Dispose();
+
+                if (_stopRequested)
                 {
-                    task.Status = "已完成";
-                    Log("任务", "运行时长到达，任务正常结束");
-                    await SendBark(task.Name, "运行结束（正常）");
+                    Log("系统", "用户手动停止。");
+                    task.Status = "已停止";
+                    KillRelatedProcesses(task);
+                    await SendBark(task.Name, "用户停止");
                 }
-            }
-            finally
-            {
-                lastScreenSample?.Dispose();
-            }
-        }
-        #endregion
-
-        #region 辅助方法（启动检测、进程列表、杀进程等）
-        #region 启动主程序并捕获进程信息
-        private async Task<(bool Success, Process? LaunchedProcess)> AttemptLaunch(TaskItem task)
-        {
-            Process? launchedProcess = null;
-
-            if (string.IsNullOrWhiteSpace(task.Path) || !File.Exists(task.Path))
-            {
-                Log("错误", "主程序路径无效或不存在");
-                return (false, null);
-            }
-
-            Log("系统", $"启动主程序: \"{task.Path}\" {task.Arguments}");
-
-            var psi = new ProcessStartInfo
-            {
-                FileName = task.Path,
-                Arguments = task.Arguments,
-                UseShellExecute = true,
-                WorkingDirectory = Path.GetDirectoryName(task.Path) ?? ""
-            };
-
-            try
-            {
-                launchedProcess = Process.Start(psi);
-                if (launchedProcess != null)
-                    Log("任务", $"主程序启动成功，PID: {launchedProcess.Id}，进程名: {launchedProcess.ProcessName}");
+                else
+                {
+                    Log("任务", "运行时间结束，正常关闭。");
+                    KillRelatedProcesses(task);
+                    task.Status = "完成";
+                    await SendBark(task.Name, "完成");
+                }
             }
             catch (Exception ex)
             {
-                Log("错误", $"启动进程异常: {ex.Message}");
-                return (false, null);
+                Log("错误", $"任务异常: {ex.Message}");
+                KillRelatedProcesses(task);
+                task.Status = "异常";
             }
+            finally { _currentTaskId = -1; }
+        }
+                #endregion
 
-            if (string.IsNullOrWhiteSpace(task.WindowTitle))
-                return (true, launchedProcess);
+        // --- 辅助方法 ---
+        private IntPtr FindZombieTargetHwnd(TaskItem task)
+        {
+            // 优先尝试进程名
+            if (!string.IsNullOrWhiteSpace(task.ZombieProcessName))
+            {
+                string cleanName = GetCleanProcessName(task.ZombieProcessName);
+                var processes = Process.GetProcessesByName(cleanName);
+                if (processes.Length > 0)
+                {
+                    IntPtr hwnd = processes[0].MainWindowHandle;
+                    if (hwnd == IntPtr.Zero)
+                    {
+                        foreach (var p in processes) if (p.MainWindowHandle != IntPtr.Zero) return p.MainWindowHandle;
+                    }
+                    if (hwnd != IntPtr.Zero) return hwnd;
+                }
+            }
+            // 尝试窗口标题
+            if (!string.IsNullOrWhiteSpace(task.ZombieWindowTitle))
+            {
+                return NativeMethods.FindWindow(null, task.ZombieWindowTitle);
+            }
+            // 保底使用启动标题
+            if (!string.IsNullOrWhiteSpace(task.WindowTitle))
+            {
+                return NativeMethods.FindWindow(null, task.WindowTitle);
+            }
+            return IntPtr.Zero;
+        }
 
-            int requiredStability = 3;
-            int consecutiveCount = 0;
+        private bool CheckIfTaskIsAlive(TaskItem task)
+        {
+            if (!string.IsNullOrWhiteSpace(task.ProcessNames))
+            {
+                if (!AreProcessesDead(task)) return true;
+            }
+            if (_currentTaskId != -1)
+            {
+                try { Process.GetProcessById(_currentTaskId); return true; } catch { }
+            }
+            return false;
+        }
 
+        private async Task<bool> AttemptLaunch(TaskItem task)
+        {
+            try
+            {
+                // 启动进程
+                if (!string.IsNullOrWhiteSpace(task.Path) && File.Exists(task.Path))
+                {
+                    var psi = new ProcessStartInfo
+                    {
+                        FileName = task.Path,
+                        Arguments = task.Arguments,
+                        UseShellExecute = true,
+                        WorkingDirectory = Path.GetDirectoryName(task.Path) ?? ""
+                    };
+                    var p = Process.Start(psi);
+                    if (p != null) _currentTaskId = p.Id;
+                }
+                else
+                {
+                    return false;
+                }
+            }
+            catch { return false; }
+
+            if (string.IsNullOrWhiteSpace(task.WindowTitle)) return true;
+
+            int requiredStability = 3; 
+            int consecutiveCount = 0; 
+
+            // 总超时时间
             for (int i = 0; i < task.RecognitionTimeout; i++)
             {
-                if (_stopRequested) return (false, launchedProcess);
+                if (_stopRequested) return false;
 
                 IntPtr hwnd = NativeMethods.FindWindow(null, task.WindowTitle);
+
                 if (hwnd != IntPtr.Zero && NativeMethods.IsWindowVisible(hwnd))
                 {
-                    if (NativeMethods.IsIconic(hwnd))
-                        NativeMethods.ShowWindow(hwnd, NativeMethods.SW_RESTORE);
+                    if (NativeMethods.IsIconic(hwnd)) NativeMethods.ShowWindow(hwnd, NativeMethods.SW_RESTORE);
+                    NativeMethods.SetForegroundWindow(hwnd);
 
                     NativeMethods.SetForegroundWindow(hwnd);
                     consecutiveCount++;
 
-                    if (consecutiveCount >= requiredStability)
+                    if (consecutiveCount < requiredStability)
+                    {
+                        Log("系统", $"{task.Name} 窗口已出现，正在确认稳定... ({consecutiveCount}/{requiredStability})");
+                    }
+                }
+                    else
                     {
                         NativeMethods.SetWindowPos(hwnd, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0,
                             NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE);
-                        Log("任务", $"窗口稳定检测成功（连续 {requiredStability} 次），已置顶窗口");
-                        return (true, launchedProcess);
+
+                        return true;
                     }
+
+            Log("错误", $"窗口标题 \"{task.WindowTitle}\" 在 {task.RecognitionTimeout} 秒内未稳定出现");
+            return (false, launchedProcess);
                 }
                 else
                 {
-                    consecutiveCount = 0;
+                    if (consecutiveCount > 0)
+                    {
+                        Log("警告", $"{task.Name} 窗口信号丢失，重新等待...");
+                        consecutiveCount = 0;
+                    }
+            return list;
                 }
 
                 await Task.Delay(1000);
             }
 
-            Log("错误", $"窗口标题 \"{task.WindowTitle}\" 在 {task.RecognitionTimeout} 秒内未稳定出现");
-            return (false, launchedProcess);
+            return false;
         }
-        #endregion
 
-        private List<Process> GetAliveProcesses(TaskItem task)
+        public Bitmap? GetScreenSample(IntPtr hwnd)
         {
-            var list = new List<Process>();
-            var names = task.ProcessNames.Split(',', StringSplitOptions.RemoveEmptyEntries);
-            foreach (var name in names)
+            if (hwnd == IntPtr.Zero) return null;
+            try
             {
-                string clean = name.Trim().Replace(".exe", "", StringComparison.OrdinalIgnoreCase);
-                if (string.IsNullOrEmpty(clean)) continue;
-                try { list.AddRange(Process.GetProcessesByName(clean)); }
-                catch { }
-            }
-            return list;
-        }
-
-        private IntPtr FindZombieTargetHwnd(TaskItem task)
-        {
-            var processes = GetAliveProcesses(task);
-            if (processes.Count > 0 && !string.IsNullOrWhiteSpace(task.ZombieProcessName))
-            {
-                string clean = task.ZombieProcessName.Trim().Replace(".exe", "", StringComparison.OrdinalIgnoreCase);
-                var match = processes.FirstOrDefault(p => p.ProcessName.Equals(clean, StringComparison.OrdinalIgnoreCase));
-                if (match != null) return match.MainWindowHandle;
-            }
-
-            if (!string.IsNullOrWhiteSpace(task.ZombieWindowTitle))
-                return NativeMethods.FindWindow(null, task.ZombieWindowTitle);
-
-            return IntPtr.Zero;
-        }
-
-        private string GetWindowTitle(IntPtr hwnd)
-        {
-            var sb = new System.Text.StringBuilder(256);
-            NativeMethods.GetWindowText(hwnd, sb, sb.Capacity);
-            return sb.ToString();
-        }
-
-        public void KillRelatedProcesses(TaskItem task)
-        {
-            var processes = GetAliveProcesses(task);
-            if (processes.Count > 0)
-            {
-                Log("操作", $"终止相关进程: {string.Join(", ", processes.Select(p => $"{p.ProcessName}(PID:{p.Id})"))}");
-                foreach (var p in processes)
+                if (NativeMethods.IsIconic(hwnd))
                 {
-                    try { p.Kill(true); p.Dispose(); }
-                    catch { }
+                    NativeMethods.ShowWindow(hwnd, NativeMethods.SW_RESTORE);
+                    Thread.Sleep(200);
                 }
-            }
-
-            if (!string.IsNullOrWhiteSpace(task.ExtraProcessNames))
-            {
-                var extraNames = task.ExtraProcessNames.Split(',', StringSplitOptions.RemoveEmptyEntries);
-                foreach (var name in extraNames)
-                {
-                    string clean = name.Trim().Replace(".exe", "", StringComparison.OrdinalIgnoreCase);
-                    if (string.IsNullOrEmpty(clean)) continue;
-                    try
-                    {
-                        foreach (var p in Process.GetProcessesByName(clean))
-                        {
-                            Log("操作", $"终止额外进程: {p.ProcessName}(PID:{p.Id})");
-                            p.Kill(true); p.Dispose();
-                        }
-                    }
-                    catch { }
-                }
-            }
-        }
 
         public Bitmap? GetScreenSample(IntPtr hwnd)
         {
@@ -449,35 +405,22 @@ namespace TaskSchedulerApp.Services
                 int h = rect.Bottom - rect.Top;
                 if (w <= 0 || h <= 0) return null;
 
-                using Bitmap fullBmp = new Bitmap(w, h);
-                using (Graphics g = Graphics.FromImage(fullBmp))
-                {
-                    IntPtr hdc = g.GetHdc();
-                    try
-                    {
-                        NativeMethods.PrintWindow(hwnd, hdc, NativeMethods.PW_RENDERFULLCONTENT);
-                    }
-                    finally
-                    {
-                        g.ReleaseHdc(hdc);
-                    }
-                }
+                int size = 100;
+                if (size > w) size = w;
+                if (size > h) size = h;
+                if (size <= 0) return null;
 
-                int size = Math.Min(100, Math.Min(w, h));
-                int sx = (w - size) / 2;
-                int sy = (h - size) / 2;
+                int sx = rect.Left + (w - size) / 2;
+                int sy = rect.Top + (h - size) / 2;
 
-                var cropped = new Bitmap(size, size);
-                using (Graphics gCrop = Graphics.FromImage(cropped))
+                Bitmap bmp = new Bitmap(size, size);
+                using (var g = Graphics.FromImage(bmp))
                 {
-                    gCrop.DrawImage(fullBmp, new Rectangle(0, 0, size, size), new Rectangle(sx, sy, size, size), GraphicsUnit.Pixel);
+                    g.CopyFromScreen(sx, sy, 0, 0, new Size(size, size));
                 }
-                return cropped;
+                return bmp;
             }
-            catch
-            {
-                return null;
-            }
+            catch { return null; }
         }
 
         public bool AreBitmapsIdentical(Bitmap? bmp1, Bitmap? bmp2)
@@ -504,48 +447,64 @@ namespace TaskSchedulerApp.Services
             return equal;
         }
 
-        public void TakeScreenshot(TaskItem task)
+        private string GetCleanProcessName(string raw) => raw?.Trim().Replace(".exe", "", StringComparison.OrdinalIgnoreCase) ?? "";
+
+        private bool AreProcessesDead(TaskItem task)
         {
-            try
+            var names = task.ProcessNames.Split(',', StringSplitOptions.RemoveEmptyEntries);
+            foreach (var name in names)
             {
-                if (!Directory.Exists(_settings.ScreenshotPath)) Directory.CreateDirectory(_settings.ScreenshotPath);
-                string path = Path.Combine(_settings.ScreenshotPath, $"{task.Name}_{DateTime.Now:MMdd_HHmmss}.png");
-                var bounds = Screen.PrimaryScreen!.Bounds;
-                using var bmp = new Bitmap(bounds.Width, bounds.Height);
-                using (var g = Graphics.FromImage(bmp))
-                {
-                    g.CopyFromScreen(Point.Empty, Point.Empty, bounds.Size);
-                }
-                bmp.Save(path, ImageFormat.Png);
-                Log("截图", $"全屏截图已保存: {path}");
+                string cleanName = GetCleanProcessName(name);
+                if (string.IsNullOrEmpty(cleanName)) continue;
+                try { if (Process.GetProcessesByName(cleanName).Length > 0) return false; } catch { }
             }
-            catch (Exception ex)
+            return true;
+        }
+
+        public void KillRelatedProcesses(TaskItem task)
+        {
+            if (_currentTaskId != -1) try { Process.GetProcessById(_currentTaskId).Kill(true); } catch { }
+            KillList(task.ProcessNames);
+            KillList(task.ExtraProcessNames);
+        }
+
+        private void KillList(string csv)
+        {
+            if (string.IsNullOrWhiteSpace(csv)) return;
+            foreach (var name in csv.Split(',', StringSplitOptions.RemoveEmptyEntries))
             {
-                Log("错误", $"截图失败: {ex.Message}");
+                string cleanName = GetCleanProcessName(name);
+                if (string.IsNullOrEmpty(cleanName)) continue;
+                try { foreach (var p in Process.GetProcessesByName(cleanName)) try { p.Kill(true); p.Dispose(); } catch { } } catch { }
             }
         }
 
-        public async Task SendBark(string title, string body)
+        public void TakeScreenshot(TaskItem task)
         {
             if (string.IsNullOrWhiteSpace(_settings.BarkUrl)) return;
             try
             {
-                string url = $"{_settings.BarkUrl.TrimEnd('/')}/{Uri.EscapeDataString(title)}/{Uri.EscapeDataString(body)}";
-                if (!string.IsNullOrWhiteSpace(_settings.BarkIcon))
-                    url += $"?icon={Uri.EscapeDataString(_settings.BarkIcon)}";
-                await _httpClient.GetAsync(url);
+                if (!Directory.Exists(_settings.ScreenshotPath)) Directory.CreateDirectory(_settings.ScreenshotPath);
+                string path = Path.Combine(_settings.ScreenshotPath, $"{task.Name}_{DateTime.Now:MMdd_HHmm}.png");
+                var bounds = Screen.PrimaryScreen.Bounds;
+                using var bmp = new Bitmap(bounds.Width, bounds.Height);
+                using (var g = Graphics.FromImage(bmp)) { g.CopyFromScreen(Point.Empty, Point.Empty, bounds.Size); }
+                bmp.Save(path, ImageFormat.Png);
+                Log("截图", "已保存");
             }
             catch { }
         }
-
+        public async Task SendBark(string t, string b)
+        {
+            if (string.IsNullOrWhiteSpace(_settings.BarkUrl)) return;
+            try { string url = $"{_settings.BarkUrl.TrimEnd('/')}/{Uri.EscapeDataString(t)}/{Uri.EscapeDataString(b)}"; if (!string.IsNullOrWhiteSpace(_settings.BarkIcon)) url += $"?icon={_settings.BarkIcon}"; await _httpClient.GetAsync(url); } catch { }
+        }
         private void PerformPostCompletionAction()
         {
             try
             {
-                if (_settings.OnCompletionAction == "Shutdown")
-                    Process.Start("shutdown", "/s /t 5");
-                else if (_settings.OnCompletionAction == "Sleep")
-                    Process.Start("rundll32.exe", "powrprof.dll,SetSuspendState 0,1,0");
+                if (_settings.OnCompletionAction == "Shutdown") Process.Start("shutdown", "/s /t 5");
+                else if (_settings.OnCompletionAction == "Sleep") Process.Start("rundll32.exe", "pow-rprof.dll,SetSuspendState 0,1,0");
             }
             catch { }
         }

@@ -49,18 +49,9 @@
             <ListBox Grid.Row="1" x:Name="MiniLogList" 
                      Background="Transparent" 
                      BorderThickness="0" 
-                     ScrollViewer.VerticalScrollBarVisibility="Auto"
+                     ScrollViewer.VerticalScrollBarVisibility="Hidden" 
                      Margin="5"
-                     MouseDoubleClick="Restore_MouseDoubleClick"
-                     VirtualizingStackPanel.IsVirtualizing="True"
-                     VirtualizingStackPanel.VirtualizationMode="Recycling"
-                     ScrollViewer.CanContentScroll="True">
-
-                <ListBox.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <VirtualizingStackPanel />
-                    </ItemsPanelTemplate>
-                </ListBox.ItemsPanel>
+                     MouseDoubleClick="Restore_MouseDoubleClick">
 
                 <ListBox.ItemContainerStyle>
                     <Style TargetType="ListBoxItem">

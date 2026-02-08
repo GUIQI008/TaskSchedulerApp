@@ -8,20 +8,15 @@ namespace TaskSchedulerApp.Core
 {
     public static class NativeMethods
     {
-        #region 窗口查找
         [DllImport("user32.dll", SetLastError = true)]
         public static extern IntPtr FindWindow(string? lpClassName, string? lpWindowName);
 
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
-        public static extern bool IsWindowVisible(IntPtr hWnd);
 
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
-        public static extern bool SetForegroundWindow(IntPtr hWnd);
-        #endregion
 
-        #region 窗口操作
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
@@ -32,7 +27,19 @@ namespace TaskSchedulerApp.Core
         [DllImport("user32.dll")]
         public static extern bool IsIconic(IntPtr hWnd);
 
+        [DllImport("user32.dll", EntryPoint = "GetWindowLongPtr")]
+        private static extern IntPtr GetWindowLongPtr64(IntPtr hWnd, int nIndex);
+
+        [DllImport("user32.dll", EntryPoint = "GetWindowLong")]
+        private static extern IntPtr GetWindowLong32(IntPtr hWnd, int nIndex);
+
+        public static IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex) =>
+            IntPtr.Size == 8 ? GetWindowLongPtr64(hWnd, nIndex) : GetWindowLong32(hWnd, nIndex);
+
+        public const int GWL_EXSTYLE = -20;
+        public const long WS_EX_TOPMOST = 0x00000008L;
         public static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+        public static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
         public const uint SWP_NOSIZE = 0x0001;
         public const uint SWP_NOMOVE = 0x0002;
         public const uint SWP_SHOWWINDOW = 0x0040;
@@ -53,7 +60,6 @@ namespace TaskSchedulerApp.Core
         public struct RECT { public int Left, Top, Right, Bottom; }
         #endregion
 
-        #region 鼠标模拟
         [DllImport("user32.dll")]
         public static extern bool SetCursorPos(int X, int Y);
 
@@ -65,16 +71,20 @@ namespace TaskSchedulerApp.Core
 
         public static void ClickLeft(int x, int y)
         {
+            //移动
             SetCursorPos(x, y);
             Thread.Sleep(200);
+
+            //按下
             mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
             Thread.Sleep(200);
+
+            //抬起
             mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
             Thread.Sleep(150);
         }
         #endregion
 
-        #region 辅助功能（键鼠状态、点下窗口标题）
         [DllImport("user32.dll")]
         public static extern short GetAsyncKeyState(int vKey);
 
@@ -101,10 +111,6 @@ namespace TaskSchedulerApp.Core
                 StringBuilder sb = new StringBuilder(256);
                 GetWindowText(hwnd, sb, 256);
                 return sb.ToString();
-            }
-            catch
-            {
-                return "";
             }
         }
         #endregion

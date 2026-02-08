@@ -11,7 +11,7 @@ public class UpdateManager
     private const string ConfigUrl = "https://api.npoint.io/c59c9d5da9f65a04a214";
 
     // 当前版本号
-    public const string CurrentVersion = "1.8.0";
+    public const string CurrentVersion = "1.7.0";
 
     public static async Task CheckOnStartup()
     {
