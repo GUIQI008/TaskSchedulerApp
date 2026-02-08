@@ -1,0 +1,58 @@
+﻿<hc:Window x:Class="TaskSchedulerApp.DebugRunWindow"
+           xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+           xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+           xmlns:hc="https://handyorg.github.io/handycontrol"
+           Title="调试运行选项" Height="500" Width="420"
+           ResizeMode="NoResize" WindowStartupLocation="CenterScreen">
+
+    <hc:Window.Resources>
+        <hc:Boolean2VisibilityReConverter x:Key="Boolean2VisibilityReConverter"/>
+    </hc:Window.Resources>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,5,0">
+        <StackPanel Margin="20">
+
+            <hc:Divider Content="基础选项"/>
+            <StackPanel Margin="0,5">
+                <CheckBox IsChecked="{Binding UseArgs}" Content="使用启动参数 (Arguments)" Margin="0,5"/>
+                <CheckBox IsChecked="{Binding SmartHide}" Content="启动后自动隐藏主窗口 (Smart Hide)" Margin="0,5"/>
+                <CheckBox IsChecked="{Binding EnableBark}" Content="发送 Bark 推送 (测试通知)" Margin="0,5"/>
+            </StackPanel>
+
+            <hc:Divider Content="监控与清理"/>
+            <StackPanel Margin="0,5">
+                <CheckBox IsChecked="{Binding EnableScreenshot}" Content="结果截图" Margin="0,5"/>
+                <CheckBox IsChecked="{Binding EnableKill}" Content="结束时清理进程" Margin="0,5"/>
+            </StackPanel>
+
+            <hc:Divider Content="高级画面监控 (僵尸检测)"/>
+            <StackPanel Margin="0,5">
+                <CheckBox IsChecked="{Binding EnableZombieCheck}" 
+                          IsEnabled="{Binding IsTitleValid}"
+                          Content="启用画面卡死检测 (本次调试有效)" 
+                          Margin="0,5"/>
+
+                <TextBlock Text="* 无法启用：请先在主界面设置“监控窗口标题”" 
+                           Foreground="Red" FontSize="10" 
+                           Visibility="{Binding IsTitleValid, Converter={StaticResource Boolean2VisibilityReConverter}}"
+                           Margin="22,0,0,5"/>
+
+                <Grid IsEnabled="{Binding EnableZombieCheck}" Margin="22,0,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="检测超时(分钟):" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                    <hc:TextBox Text="{Binding ZombieTimeout}" Width="100" HorizontalAlignment="Left" Grid.Column="1"/>
+                </Grid>
+
+                <TextBlock Text="* 使用当前任务配置的“监控窗口标题”进行像素比对" FontSize="10" Foreground="Gray" Margin="22,5,0,0"/>
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,20">
+                <Button Content="取消" Click="Cancel_Click" Style="{StaticResource ButtonDefault}" Margin="0,0,10,0" Width="80"/>
+                <Button Content="开始调试" Click="Confirm_Click" Style="{StaticResource ButtonPrimary}" Width="100"/>
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</hc:Window>
