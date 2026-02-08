@@ -238,8 +238,16 @@ namespace TaskSchedulerApp
         }
         private void SaveConfig()
         {
-            try { string json = JsonConvert.SerializeObject(Settings, Formatting.Indented); File.WriteAllText("config.json", json); }
-            catch (Exception ex) { Log("错误", "保存失败: " + ex.Message); }
+            try
+            {
+                string json = JsonConvert.SerializeObject(Settings, Formatting.Indented);
+                File.WriteAllText("config.json", json);
+                Log("系统", "配置已保存");
+            }
+            catch (Exception ex)
+            {
+                Log("错误", "保存失败: " + ex.Message);
+            }
         }
 
         private void BrowseFile()
