@@ -216,7 +216,6 @@ namespace TaskSchedulerApp
             MoveDownCommand = new RelayCommand(() => { if (SelectedTask != null && Settings.TaskList.IndexOf(SelectedTask) < Settings.TaskList.Count - 1) { Settings.TaskList.Move(Settings.TaskList.IndexOf(SelectedTask), Settings.TaskList.IndexOf(SelectedTask) + 1); SaveConfig(); } });
 
             BrowseFileCommand = new RelayCommand(BrowseFile);
-            // 新增：浏览额外文件
             BrowseExtraFileCommand = new RelayCommand(BrowseExtraFile);
 
             StartTaskCommand = new RelayCommand(StartTasks);

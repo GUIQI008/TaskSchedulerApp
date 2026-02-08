@@ -218,7 +218,7 @@ namespace TaskSchedulerApp.Services
                     }
                     #endregion
 
-                    #region 僵尸窗口检测（极致最小日志：移除每分钟汇报）
+                    #region 僵尸窗口检测（极致零日志：只关键事件）
                     if (task.IsZombieCheckEnabled)
                     {
                         IntPtr zombieHwnd = FindZombieTargetHwnd(task);
@@ -226,6 +226,7 @@ namespace TaskSchedulerApp.Services
                         {
                             string title = GetWindowTitle(zombieHwnd);
 
+                            // 只在窗口变更时打印（很少触发）
                             if (lastLoggedHwnd != zombieHwnd)
                             {
                                 Log("监控", $"僵尸检测目标窗口变更: HWND=0x{zombieHwnd.ToInt64():X}, 标题=\"{title}\"");
@@ -241,6 +242,7 @@ namespace TaskSchedulerApp.Services
                                     {
                                         double stagnantMinutes = (DateTime.Now - lastScreenChangeTime).TotalMinutes;
 
+                                        // 只在最终卡死时打印（无中间汇报）
                                         if (stagnantMinutes >= task.ZombieCheckTimeout)
                                         {
                                             Log("监控", $"画面卡死超过 {task.ZombieCheckTimeout} 分钟，终止任务");
@@ -252,15 +254,15 @@ namespace TaskSchedulerApp.Services
                                     }
                                     else
                                     {
-                                        Log("监控", "画面发生变化，重置卡死计时");
+                                        // 画面变化：安静重置，不打印任何日志！
                                         lastScreenChangeTime = DateTime.Now;
-
                                         lastScreenSample?.Dispose();
                                         lastScreenSample = (Bitmap)currentSample.Clone();
                                     }
                                 }
                                 else
                                 {
+                                    // 只在首次采样时打印一次
                                     Log("监控", "僵尸检测开始采样初始画面");
                                     lastScreenSample = (Bitmap)currentSample.Clone();
                                     lastScreenChangeTime = DateTime.Now;
@@ -269,6 +271,7 @@ namespace TaskSchedulerApp.Services
                         }
                         else if (lastLoggedHwnd != IntPtr.Zero)
                         {
+                            // 窗口消失时打印一次
                             Log("监控", "僵尸检测目标窗口已消失");
                             lastLoggedHwnd = IntPtr.Zero;
                         }
