@@ -172,7 +172,7 @@ namespace TaskSchedulerApp.Services
                 if (task.PosX != 0 || task.PosY != 0)
                 {
                     Log("操作", $"模拟点击坐标: ({task.PosX}, {task.PosY})");
-                    Thread.Sleep(500);
+                    Thread.Sleep(3500);
                     NativeMethods.ClickLeft(task.PosX, task.PosY);
                 }
 
@@ -219,19 +219,12 @@ namespace TaskSchedulerApp.Services
                     }
                     #endregion
 
-                    #region 僵尸窗口检测
+                    #region 僵尸窗口检测（完全静默：无任何日志输出）
                     if (task.IsZombieCheckEnabled)
                     {
                         IntPtr zombieHwnd = FindZombieTargetHwnd(task);
                         if (zombieHwnd != IntPtr.Zero)
                         {
-                            if (lastLoggedHwnd != zombieHwnd)
-                            {
-                                string title = GetWindowTitle(zombieHwnd);
-                                Log("监控", $"僵尸检测目标窗口变更: HWND=0x{zombieHwnd.ToInt64():X}, 标题=\"{title}\"");
-                                lastLoggedHwnd = zombieHwnd;
-                            }
-
                             using Bitmap? currentSample = GetScreenSample(zombieHwnd);
                             if (currentSample != null)
                             {
@@ -243,7 +236,6 @@ namespace TaskSchedulerApp.Services
 
                                         if (stagnantMinutes >= task.ZombieCheckTimeout)
                                         {
-                                            Log("监控", $"画面卡死超过 {task.ZombieCheckTimeout} 分钟，终止任务");
                                             KillRelatedProcesses(task);
                                             task.Status = "卡死终止";
                                             await SendBark(task.Name, "卡死终止");
@@ -259,16 +251,10 @@ namespace TaskSchedulerApp.Services
                                 }
                                 else
                                 {
-                                    Log("监控", "僵尸检测开始采样初始画面");
                                     lastScreenSample = (Bitmap)currentSample.Clone();
                                     lastScreenChangeTime = DateTime.Now;
                                 }
                             }
-                        }
-                        else if (lastLoggedHwnd != IntPtr.Zero)
-                        {
-                            Log("监控", "僵尸检测目标窗口已消失");
-                            lastLoggedHwnd = IntPtr.Zero;
                         }
                     }
                     #endregion
