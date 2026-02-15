@@ -219,16 +219,15 @@ namespace TaskSchedulerApp.Services
                     }
                     #endregion
 
-                    #region 僵尸窗口检测（极致零日志：只关键事件）
+                    #region 僵尸窗口检测
                     if (task.IsZombieCheckEnabled)
                     {
                         IntPtr zombieHwnd = FindZombieTargetHwnd(task);
                         if (zombieHwnd != IntPtr.Zero)
                         {
-                            string title = GetWindowTitle(zombieHwnd);
-
                             if (lastLoggedHwnd != zombieHwnd)
                             {
+                                string title = GetWindowTitle(zombieHwnd);
                                 Log("监控", $"僵尸检测目标窗口变更: HWND=0x{zombieHwnd.ToInt64():X}, 标题=\"{title}\"");
                                 lastLoggedHwnd = zombieHwnd;
                             }
@@ -268,7 +267,6 @@ namespace TaskSchedulerApp.Services
                         }
                         else if (lastLoggedHwnd != IntPtr.Zero)
                         {
-                            // 窗口消失时打印一次
                             Log("监控", "僵尸检测目标窗口已消失");
                             lastLoggedHwnd = IntPtr.Zero;
                         }
