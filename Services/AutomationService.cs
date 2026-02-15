@@ -172,6 +172,7 @@ namespace TaskSchedulerApp.Services
                 if (task.PosX != 0 || task.PosY != 0)
                 {
                     Log("操作", $"模拟点击坐标: ({task.PosX}, {task.PosY})");
+                    Thread.Sleep(500);
                     NativeMethods.ClickLeft(task.PosX, task.PosY);
                 }
 
