@@ -1,5 +1,4 @@
 ﻿#nullable enable
-
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
@@ -19,10 +18,7 @@ namespace TaskSchedulerApp.Services
         private volatile bool _stopRequested = false;
         private static readonly HttpClient _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
         private readonly object _logLock = new object();
-
-        // 防刷屏状态字段
         private IntPtr lastLoggedHwnd = IntPtr.Zero;
-        private double lastLoggedStagnantMinutes = 0;
         private bool lastAliveState = true;
 
         public bool IsStopRequested => _stopRequested;
@@ -121,6 +117,7 @@ namespace TaskSchedulerApp.Services
         {
             Bitmap? lastScreenSample = null;
             DateTime lastScreenChangeTime = DateTime.Now;
+            Process? mainProcess = null;
 
             try
             {
@@ -150,13 +147,14 @@ namespace TaskSchedulerApp.Services
                 }
                 #endregion
 
-                #region 启动主程序
-                var (launchSuccess, mainProcess) = await AttemptLaunch(task);
+                #region 启动主程序并捕获进程
+                var (launchSuccess, launchedProcess) = await AttemptLaunch(task);
+                mainProcess = launchedProcess;
 
                 if (!launchSuccess)
                 {
                     Log("错误", $"{task.Name} 启动失败（窗口/进程未检测到），跳过任务");
-                    KillRelatedProcesses(task);
+                    KillRelatedProcesses(task, mainProcess);
                     task.Status = "启动失败";
                     return;
                 }
@@ -169,12 +167,14 @@ namespace TaskSchedulerApp.Services
                 Log("任务", "等待 3 秒窗口稳定...");
                 await Task.Delay(3000);
 
+                #region 模拟点击
                 if (task.PosX != 0 || task.PosY != 0)
                 {
                     Log("操作", $"模拟点击坐标: ({task.PosX}, {task.PosY})");
                     Thread.Sleep(3500);
                     NativeMethods.ClickLeft(task.PosX, task.PosY);
                 }
+                #endregion
 
                 task.Status = "运行中";
                 Log("任务", $"开始监控运行，时长: {task.RunTime} 分钟");
@@ -186,17 +186,13 @@ namespace TaskSchedulerApp.Services
                 #region 主监控循环
                 while (DateTime.Now < endTime && !_stopRequested)
                 {
-                    #region 进程存活检测
+                    #region 进程存活检测（固定5秒，状态变化打印）
                     var aliveProcesses = GetAliveProcesses(task);
                     bool currentlyAlive = aliveProcesses.Count > 0;
 
                     if (currentlyAlive != lastAliveState)
                     {
-                        if (currentlyAlive)
-                            Log("监控", $"目标进程恢复，当前存活 PID: {string.Join(", ", aliveProcesses.Select(p => p.Id))}");
-                        else
-                            Log("监控", "目标进程丢失（连续5秒将结束任务）");
-
+                        Log("监控", currentlyAlive ? $"目标进程恢复，PID: {string.Join(", ", aliveProcesses.Select(p => p.Id))}" : "目标进程丢失（连续5秒结束任务）");
                         lastAliveState = currentlyAlive;
                     }
 
@@ -207,7 +203,7 @@ namespace TaskSchedulerApp.Services
                         if (missingCounter >= 5)
                         {
                             Log("监控", $"{task.Name} 主进程连续丢失5秒，任务结束");
-                            KillRelatedProcesses(task);
+                            KillRelatedProcesses(task, mainProcess);
                             task.Status = "已完成";
                             await SendBark(task.Name, "运行结束（进程丢失5秒）");
                             return;
@@ -219,7 +215,7 @@ namespace TaskSchedulerApp.Services
                     }
                     #endregion
 
-                    #region 僵尸窗口检测（完全静默：无任何日志输出）
+                    #region 僵尸窗口检测（完全静默）
                     if (task.IsZombieCheckEnabled)
                     {
                         IntPtr zombieHwnd = FindZombieTargetHwnd(task);
@@ -236,7 +232,7 @@ namespace TaskSchedulerApp.Services
 
                                         if (stagnantMinutes >= task.ZombieCheckTimeout)
                                         {
-                                            KillRelatedProcesses(task);
+                                            KillRelatedProcesses(task, mainProcess);
                                             task.Status = "卡死终止";
                                             await SendBark(task.Name, "卡死终止");
                                             return;
@@ -263,12 +259,20 @@ namespace TaskSchedulerApp.Services
                 }
                 #endregion
 
-                if (!_stopRequested)
+                #region 结束处理（包括手动停止）
+                if (_stopRequested)
+                {
+                    task.Status = "手动停止";
+                    KillRelatedProcesses(task, mainProcess);
+                    await SendBark(task.Name, "手动停止");
+                }
+                else
                 {
                     task.Status = "已完成";
-                    Log("任务", "运行时长到达，任务正常结束");
+                    KillRelatedProcesses(task, mainProcess);
                     await SendBark(task.Name, "运行结束（正常）");
                 }
+                #endregion
             }
             finally
             {
@@ -313,7 +317,9 @@ namespace TaskSchedulerApp.Services
             if (string.IsNullOrWhiteSpace(task.WindowTitle))
                 return (true, launchedProcess);
 
-            int requiredStability = 3;
+            Log("任务", $"开始窗口标题检测: \"{task.WindowTitle}\"，总时长 {task.RecognitionTimeout} 秒（需连续2次稳定）");
+
+            int requiredStability = 2;
             int consecutiveCount = 0;
 
             for (int i = 0; i < task.RecognitionTimeout; i++)
@@ -329,6 +335,8 @@ namespace TaskSchedulerApp.Services
                     NativeMethods.SetForegroundWindow(hwnd);
                     consecutiveCount++;
 
+                    Log("监控", $"检测到目标窗口（连续 {consecutiveCount}/{requiredStability} 次）");
+
                     if (consecutiveCount >= requiredStability)
                     {
                         NativeMethods.SetWindowPos(hwnd, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0,
@@ -339,13 +347,17 @@ namespace TaskSchedulerApp.Services
                 }
                 else
                 {
+                    if (consecutiveCount > 0)
+                        Log("监控", "窗口短暂消失，重置稳定计数");
+
                     consecutiveCount = 0;
                 }
 
                 await Task.Delay(1000);
             }
 
-            Log("错误", $"窗口标题 \"{task.WindowTitle}\" 在 {task.RecognitionTimeout} 秒内未稳定出现");
+            Log("错误", $"窗口标题 \"{task.WindowTitle}\" 在 {task.RecognitionTimeout} 秒内未达到连续 {requiredStability} 次稳定");
+            Log("提示", "建议检查标题精确匹配（大小写、空格）或增大超时时间");
             return (false, launchedProcess);
         }
 
@@ -386,40 +398,48 @@ namespace TaskSchedulerApp.Services
             return sb.ToString();
         }
 
-        public void KillRelatedProcesses(TaskItem task)
+        private void KillRelatedProcesses(TaskItem task, Process? mainProcess = null)
         {
-            var processes = GetAliveProcesses(task);
-            if (processes.Count > 0)
+            if (mainProcess != null && !mainProcess.HasExited)
             {
-                Log("操作", $"终止相关进程: {string.Join(", ", processes.Select(p => $"{p.ProcessName}(PID:{p.Id})"))}");
-                foreach (var p in processes)
+                try
                 {
-                    try { p.Kill(true); p.Dispose(); }
-                    catch { }
+                    mainProcess.Kill(true);
+                    mainProcess.WaitForExit(5000);
+                    mainProcess.Dispose();
                 }
+                catch { try { mainProcess.Dispose(); } catch { } }
             }
 
+            var allNames = new List<string>();
+            if (!string.IsNullOrWhiteSpace(task.ProcessNames))
+                allNames.AddRange(task.ProcessNames.Split(',', StringSplitOptions.RemoveEmptyEntries));
             if (!string.IsNullOrWhiteSpace(task.ExtraProcessNames))
+                allNames.AddRange(task.ExtraProcessNames.Split(',', StringSplitOptions.RemoveEmptyEntries));
+
+            foreach (var name in allNames)
             {
-                var extraNames = task.ExtraProcessNames.Split(',', StringSplitOptions.RemoveEmptyEntries);
-                foreach (var name in extraNames)
+                string clean = name.Trim().Replace(".exe", "", StringComparison.OrdinalIgnoreCase);
+                if (string.IsNullOrEmpty(clean)) continue;
+                try
                 {
-                    string clean = name.Trim().Replace(".exe", "", StringComparison.OrdinalIgnoreCase);
-                    if (string.IsNullOrEmpty(clean)) continue;
-                    try
+                    foreach (var p in Process.GetProcessesByName(clean))
                     {
-                        foreach (var p in Process.GetProcessesByName(clean))
+                        if (p.HasExited) continue;
+                        try
                         {
-                            Log("操作", $"终止额外进程: {p.ProcessName}(PID:{p.Id})");
-                            p.Kill(true); p.Dispose();
+                            p.Kill(true);
+                            p.WaitForExit(5000);
+                            p.Dispose();
                         }
+                        catch { try { p.Dispose(); } catch { } }
                     }
-                    catch { }
                 }
+                catch { }
             }
         }
 
-        public Bitmap? GetScreenSample(IntPtr hwnd)
+        private Bitmap? GetScreenSample(IntPtr hwnd)
         {
             if (hwnd == IntPtr.Zero) return null;
             try
