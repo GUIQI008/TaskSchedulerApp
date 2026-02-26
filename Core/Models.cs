@@ -18,7 +18,7 @@ namespace TaskSchedulerApp.Models
         private string path = "";
         private string arguments = "";
         private string windowTitle = "";
-        private int recognitionTimeout = 15; 
+        private int recognitionTimeout = 15;
         private string processNames = "";
         private string extraProcessNames = "";
         private int runTime = 60;
@@ -27,10 +27,6 @@ namespace TaskSchedulerApp.Models
         private string status = "等待中";
         private string extraStartPath = "";
         private string extraStartArguments = "";
-        private bool isZombieCheckEnabled = false;
-        private string zombieWindowTitle = "";
-        private string zombieProcessName = "";
-        private int zombieCheckTimeout = 5;
 
         public string Name { get => name; set { name = value; OnPropertyChanged(); } }
         public string Path { get => path; set { path = value; OnPropertyChanged(); } }
@@ -48,10 +44,6 @@ namespace TaskSchedulerApp.Models
 
         public string ExtraStartPath { get => extraStartPath; set { extraStartPath = value; OnPropertyChanged(); } }
         public string ExtraStartArguments { get => extraStartArguments; set { extraStartArguments = value; OnPropertyChanged(); } }
-        public bool IsZombieCheckEnabled { get => isZombieCheckEnabled; set { isZombieCheckEnabled = value; OnPropertyChanged(); } }
-        public string ZombieWindowTitle { get => zombieWindowTitle; set { zombieWindowTitle = value; OnPropertyChanged(); } }
-        public string ZombieProcessName { get => zombieProcessName; set { zombieProcessName = value; OnPropertyChanged(); } }
-        public int ZombieCheckTimeout { get => zombieCheckTimeout; set { zombieCheckTimeout = value; OnPropertyChanged(); } }
     }
 
     public class AppSettings : ObservableObject

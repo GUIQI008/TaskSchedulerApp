@@ -4,7 +4,8 @@
         xmlns:hc="https://handyorg.github.io/handycontrol"
         Title="MiniLog" Height="220" Width="380"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"
-        Topmost="True" ShowInTaskbar="False" ResizeMode="CanResizeWithGrip">
+        Topmost="True" ShowInTaskbar="False" ResizeMode="CanResizeWithGrip"
+        WindowStartupLocation="Manual">
 
     <WindowChrome.WindowChrome>
         <WindowChrome CaptionHeight="0" ResizeBorderThickness="10" GlassFrameThickness="0" CornerRadius="0"/>
