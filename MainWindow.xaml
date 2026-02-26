@@ -153,28 +153,6 @@
                                 <hc:TextBox Grid.Column="2" hc:InfoElement.Title="最大运行时间 (分钟)" Text="{Binding SelectedTask.RunTime, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource TextBoxExtend}"/>
                             </Grid>
 
-                            <hc:Divider Content="高级画面监控 (僵尸检测)" Margin="0,20,0,15"/>
-                            <StackPanel Margin="5,0">
-                                <CheckBox IsChecked="{Binding SelectedTask.IsZombieCheckEnabled}" Content="启用画面卡死检测 (像素级比对)" Margin="0,0,0,10"/>
-                                <StackPanel IsEnabled="{Binding SelectedTask.IsZombieCheckEnabled}">
-                                    <hc:TextBox hc:InfoElement.Title="独立监控进程名 (推荐)" 
-                hc:InfoElement.Placeholder="例如: NemuPlayer (不带.exe)"
-                Text="{Binding SelectedTask.ZombieProcessName, UpdateSourceTrigger=PropertyChanged}" 
-                Style="{StaticResource TextBoxExtend}"
-                Margin="0,0,0,10"/>
-                                    <hc:TextBox hc:InfoElement.Title="独立监控窗口标题 (可选)" hc:InfoElement.Placeholder="若留空，则默认监控上方的“启动窗口标题”" Text="{Binding SelectedTask.ZombieWindowTitle, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource TextBoxExtend}" Margin="0,0,0,10"/>
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="150"/>
-                                            <ColumnDefinition Width="15"/>
-                                            <ColumnDefinition Width="*"/>
-                                        </Grid.ColumnDefinitions>
-                                        <hc:TextBox Grid.Column="0" hc:InfoElement.Title="超时判定 (分钟)" Text="{Binding SelectedTask.ZombieCheckTimeout, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource TextBoxExtend}"/>
-                                        <TextBlock Grid.Column="2" Text="* 原理：每分钟截取画面中心。若连续 N 分钟画面像素完全一致，则判定为卡死并重启。" FontSize="11" Foreground="Gray" TextWrapping="Wrap" VerticalAlignment="Bottom" Margin="0,0,0,8"/>
-                                    </Grid>
-                                </StackPanel>
-                            </StackPanel>
-
                             <hc:Divider Content="模拟操作 (可选)" Margin="0,20,0,15"/>
                             <Border BorderThickness="1" BorderBrush="{DynamicResource BorderBrush}" CornerRadius="6" Padding="15" Background="{DynamicResource SecondaryRegionBrush}">
                                 <Grid>

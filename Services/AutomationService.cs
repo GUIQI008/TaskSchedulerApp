@@ -1,4 +1,5 @@
 ﻿#nullable enable
+
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
@@ -18,7 +19,6 @@ namespace TaskSchedulerApp.Services
         private volatile bool _stopRequested = false;
         private static readonly HttpClient _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
         private readonly object _logLock = new object();
-        private IntPtr lastLoggedHwnd = IntPtr.Zero;
         private bool lastAliveState = true;
 
         public bool IsStopRequested => _stopRequested;
@@ -85,14 +85,20 @@ namespace TaskSchedulerApp.Services
         {
             _stopRequested = false;
             Log("系统", "=== 开始执行任务队列 ===");
-            int total = _settings.TaskList.Count;
-            int startIdx = startFrom != null ? Math.Max(0, _settings.TaskList.IndexOf(startFrom)) : 0;
+            var executionQueue = _settings.TaskList.ToList();
+            int total = executionQueue.Count;
+            int startIdx = 0;
+            if (startFrom != null)
+            {
+                int originalIndex = _settings.TaskList.IndexOf(startFrom);
+                if (originalIndex >= 0) startIdx = originalIndex;
+            }
 
             for (int i = startIdx; i < total; i++)
             {
                 if (_stopRequested) { Log("系统", "收到停止指令，中断队列执行"); break; }
 
-                var task = _settings.TaskList[i];
+                var task = executionQueue[i];
                 Log("系统", $">>> 执行任务 {i + 1}/{total}: {task.Name}");
 
                 await RunSingleTask(task);
@@ -115,8 +121,6 @@ namespace TaskSchedulerApp.Services
         #region 单任务核心执行逻辑
         public async Task RunSingleTask(TaskItem task)
         {
-            Bitmap? lastScreenSample = null;
-            DateTime lastScreenChangeTime = DateTime.Now;
             Process? mainProcess = null;
 
             try
@@ -153,6 +157,14 @@ namespace TaskSchedulerApp.Services
 
                 if (!launchSuccess)
                 {
+                    if (_stopRequested)
+                    {
+                        Log("系统", $"{task.Name} 启动过程中被手动停止");
+                        task.Status = "手动停止";
+                        KillRelatedProcesses(task, mainProcess);
+                        return;
+                    }
+
                     Log("错误", $"{task.Name} 启动失败（窗口/进程未检测到），跳过任务");
                     KillRelatedProcesses(task, mainProcess);
                     task.Status = "启动失败";
@@ -171,7 +183,7 @@ namespace TaskSchedulerApp.Services
                 if (task.PosX != 0 || task.PosY != 0)
                 {
                     Log("操作", $"模拟点击坐标: ({task.PosX}, {task.PosY})");
-                    Thread.Sleep(3500);
+                    Thread.Sleep(500);
                     NativeMethods.ClickLeft(task.PosX, task.PosY);
                 }
                 #endregion
@@ -186,7 +198,7 @@ namespace TaskSchedulerApp.Services
                 #region 主监控循环
                 while (DateTime.Now < endTime && !_stopRequested)
                 {
-                    #region 进程存活检测（固定5秒，状态变化打印）
+                    #region 进程存活检测（固定5秒）
                     var aliveProcesses = GetAliveProcesses(task);
                     bool currentlyAlive = aliveProcesses.Count > 0;
 
@@ -199,7 +211,6 @@ namespace TaskSchedulerApp.Services
                     if (!currentlyAlive)
                     {
                         missingCounter++;
-
                         if (missingCounter >= 5)
                         {
                             Log("监控", $"{task.Name} 主进程连续丢失5秒，任务结束");
@@ -215,51 +226,11 @@ namespace TaskSchedulerApp.Services
                     }
                     #endregion
 
-                    #region 僵尸窗口检测（完全静默）
-                    if (task.IsZombieCheckEnabled)
-                    {
-                        IntPtr zombieHwnd = FindZombieTargetHwnd(task);
-                        if (zombieHwnd != IntPtr.Zero)
-                        {
-                            using Bitmap? currentSample = GetScreenSample(zombieHwnd);
-                            if (currentSample != null)
-                            {
-                                if (lastScreenSample != null)
-                                {
-                                    if (AreBitmapsIdentical(lastScreenSample, currentSample))
-                                    {
-                                        double stagnantMinutes = (DateTime.Now - lastScreenChangeTime).TotalMinutes;
-
-                                        if (stagnantMinutes >= task.ZombieCheckTimeout)
-                                        {
-                                            KillRelatedProcesses(task, mainProcess);
-                                            task.Status = "卡死终止";
-                                            await SendBark(task.Name, "卡死终止");
-                                            return;
-                                        }
-                                    }
-                                    else
-                                    {
-                                        lastScreenChangeTime = DateTime.Now;
-                                        lastScreenSample?.Dispose();
-                                        lastScreenSample = (Bitmap)currentSample.Clone();
-                                    }
-                                }
-                                else
-                                {
-                                    lastScreenSample = (Bitmap)currentSample.Clone();
-                                    lastScreenChangeTime = DateTime.Now;
-                                }
-                            }
-                        }
-                    }
-                    #endregion
-
                     await Task.Delay(1000);
                 }
                 #endregion
 
-                #region 结束处理（包括手动停止）
+                #region 结束处理
                 if (_stopRequested)
                 {
                     task.Status = "手动停止";
@@ -276,7 +247,7 @@ namespace TaskSchedulerApp.Services
             }
             finally
             {
-                lastScreenSample?.Dispose();
+                KillRelatedProcesses(task, mainProcess);
             }
         }
         #endregion
@@ -375,40 +346,26 @@ namespace TaskSchedulerApp.Services
             return list;
         }
 
-        private IntPtr FindZombieTargetHwnd(TaskItem task)
-        {
-            var processes = GetAliveProcesses(task);
-            if (processes.Count > 0 && !string.IsNullOrWhiteSpace(task.ZombieProcessName))
-            {
-                string clean = task.ZombieProcessName.Trim().Replace(".exe", "", StringComparison.OrdinalIgnoreCase);
-                var match = processes.FirstOrDefault(p => p.ProcessName.Equals(clean, StringComparison.OrdinalIgnoreCase));
-                if (match != null) return match.MainWindowHandle;
-            }
-
-            if (!string.IsNullOrWhiteSpace(task.ZombieWindowTitle))
-                return NativeMethods.FindWindow(null, task.ZombieWindowTitle);
-
-            return IntPtr.Zero;
-        }
-
-        private string GetWindowTitle(IntPtr hwnd)
-        {
-            var sb = new System.Text.StringBuilder(256);
-            NativeMethods.GetWindowText(hwnd, sb, sb.Capacity);
-            return sb.ToString();
-        }
-
         private void KillRelatedProcesses(TaskItem task, Process? mainProcess = null)
         {
-            if (mainProcess != null && !mainProcess.HasExited)
+            if (mainProcess != null)
             {
                 try
                 {
-                    mainProcess.Kill(true);
-                    mainProcess.WaitForExit(5000);
-                    mainProcess.Dispose();
+                    bool hasExited = true;
+                    try { hasExited = mainProcess.HasExited; } catch { }
+
+                    if (!hasExited)
+                    {
+                        mainProcess.Kill(true);
+                        mainProcess.WaitForExit(2000);
+                    }
                 }
-                catch { try { mainProcess.Dispose(); } catch { } }
+                catch { /* 忽略所有杀进程错误，比如拒绝访问或进程已结束 */ }
+                finally
+                {
+                    try { mainProcess.Dispose(); } catch { }
+                }
             }
 
             var allNames = new List<string>();
@@ -421,91 +378,27 @@ namespace TaskSchedulerApp.Services
             {
                 string clean = name.Trim().Replace(".exe", "", StringComparison.OrdinalIgnoreCase);
                 if (string.IsNullOrEmpty(clean)) continue;
+
                 try
                 {
                     foreach (var p in Process.GetProcessesByName(clean))
                     {
-                        if (p.HasExited) continue;
                         try
                         {
-                            p.Kill(true);
-                            p.WaitForExit(5000);
-                            p.Dispose();
+                            bool hasExited = true;
+                            try { hasExited = p.HasExited; } catch { }
+
+                            if (!hasExited)
+                            {
+                                p.Kill(true);
+                                p.WaitForExit(1000);
+                            }
                         }
-                        catch { try { p.Dispose(); } catch { } }
+                        catch { }
+                        finally { try { p.Dispose(); } catch { } }
                     }
                 }
                 catch { }
-            }
-        }
-
-        private Bitmap? GetScreenSample(IntPtr hwnd)
-        {
-            if (hwnd == IntPtr.Zero) return null;
-            try
-            {
-                NativeMethods.GetWindowRect(hwnd, out NativeMethods.RECT rect);
-                int w = rect.Right - rect.Left;
-                int h = rect.Bottom - rect.Top;
-                if (w <= 0 || h <= 0) return null;
-
-                using Bitmap fullBmp = new Bitmap(w, h);
-                using (Graphics g = Graphics.FromImage(fullBmp))
-                {
-                    IntPtr hdc = g.GetHdc();
-                    try
-                    {
-                        NativeMethods.PrintWindow(hwnd, hdc, NativeMethods.PW_RENDERFULLCONTENT);
-                    }
-                    finally
-                    {
-                        g.ReleaseHdc(hdc);
-                    }
-                }
-
-                int size = Math.Min(100, Math.Min(w, h));
-                int sx = (w - size) / 2;
-                int sy = (h - size) / 2;
-
-                var cropped = new Bitmap(size, size);
-                using (Graphics gCrop = Graphics.FromImage(cropped))
-                {
-                    gCrop.DrawImage(fullBmp, new Rectangle(0, 0, size, size), new Rectangle(sx, sy, size, size), GraphicsUnit.Pixel);
-                }
-                return cropped;
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        private bool AreBitmapsIdentical(Bitmap bmp1, Bitmap bmp2)
-        {
-            if (bmp1.Size != bmp2.Size) return false;
-
-            BitmapData data1 = bmp1.LockBits(new Rectangle(0, 0, bmp1.Width, bmp1.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
-            BitmapData data2 = bmp2.LockBits(new Rectangle(0, 0, bmp2.Width, bmp2.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
-
-            try
-            {
-                int bytes = Math.Abs(data1.Stride) * bmp1.Height;
-                byte[] buffer1 = new byte[bytes];
-                byte[] buffer2 = new byte[bytes];
-
-                System.Runtime.InteropServices.Marshal.Copy(data1.Scan0, buffer1, 0, bytes);
-                System.Runtime.InteropServices.Marshal.Copy(data2.Scan0, buffer2, 0, bytes);
-
-                for (int i = 0; i < bytes; i++)
-                {
-                    if (buffer1[i] != buffer2[i]) return false;
-                }
-                return true;
-            }
-            finally
-            {
-                bmp1.UnlockBits(data1);
-                bmp2.UnlockBits(data2);
             }
         }
 

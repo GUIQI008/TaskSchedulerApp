@@ -22,7 +22,6 @@ namespace TaskSchedulerApp
         private DispatcherTimer _hotkeyTimer;
         private MiniLogWindow? _miniLogWindow;
         private DateTime _lastHotkeyTime = DateTime.MinValue;
-        private readonly object _logLock = new object();
 
         public MainWindow()
         {
@@ -62,13 +61,26 @@ namespace TaskSchedulerApp
         public void HideWindow()
         {
             this.Hide();
-            if (_miniLogWindow != null) { _miniLogWindow.Close(); _miniLogWindow = null; }
+
+            if (_miniLogWindow != null)
+            {
+                try { _miniLogWindow.Close(); } catch { }
+                _miniLogWindow = null;
+            }
+
             try
             {
                 _miniLogWindow = new MiniLogWindow(_viewModel.Logs, _viewModel.Settings, () => { RestoreMainWindow(); });
                 _miniLogWindow.Show();
             }
-            catch (Exception ex) { _viewModel.Log("错误", "MiniLog Error: " + ex.Message); this.Show(); }
+            catch (Exception ex)
+            {
+                _viewModel.Log("错误", "MiniLog 创建失败: " + ex.Message);
+
+                this.Show();
+                this.WindowState = WindowState.Normal;
+                this.Activate();
+            }
         }
 
         public void RestoreMainWindow()
@@ -76,7 +88,13 @@ namespace TaskSchedulerApp
             this.Show();
             this.WindowState = WindowState.Normal;
             this.Activate();
-            if (_miniLogWindow != null) { try { _miniLogWindow.Close(); } catch { } _miniLogWindow = null; }
+
+            if (_miniLogWindow != null)
+            {
+                try { _miniLogWindow.Close(); } catch { }
+                _miniLogWindow = null;
+            }
+
             _viewModel.SaveConfigCommand.Execute(null);
         }
 
@@ -105,7 +123,7 @@ namespace TaskSchedulerApp
                     }
                 }
             }
-            catch { try { _notifyIcon.Icon =SystemIcons.Application; } catch { } }
+            catch { try { _notifyIcon.Icon = SystemIcons.Application; } catch { } }
 
             _notifyIcon.Visible = true;
             _notifyIcon.Text = "自动化任务工具";
@@ -136,8 +154,8 @@ namespace TaskSchedulerApp
 
         private void HotkeyTimer_Tick(object? sender, EventArgs e)
         {
+            if (!this.IsActive) return;
             if ((DateTime.Now - _lastHotkeyTime).TotalMilliseconds < 500) return;
-
             if (NativeMethods.GetAsyncKeyState(0x78) != 0 && _viewModel.SelectedTask != null) // F9
             {
                 _lastHotkeyTime = DateTime.Now;
@@ -230,11 +248,13 @@ namespace TaskSchedulerApp
         {
             if (File.Exists("config.json")) try { var l = JsonConvert.DeserializeObject<AppSettings>(File.ReadAllText("config.json")); if (l != null) Settings = l; } catch { }
         }
+
         private void OpenAbout()
         {
             var aboutWin = new TaskSchedulerApp.Views.AboutWindow { Owner = Application.Current.MainWindow };
             aboutWin.ShowDialog();
         }
+
         private void SaveConfig()
         {
             try
@@ -286,16 +306,13 @@ namespace TaskSchedulerApp
                 if (dlg.SmartHide) _view.HideWindow();
                 _runner = new AutomationService(Settings, Log);
 
-                bool originalZombie = SelectedTask.IsZombieCheckEnabled;
                 string originalArgs = SelectedTask.Arguments;
 
-                SelectedTask.IsZombieCheckEnabled = dlg.EnableZombieCheck;
                 if (!dlg.UseArgs) SelectedTask.Arguments = "";
 
                 Log("调试", $"=== 调试: {SelectedTask.Name} ===");
                 await _runner.RunSingleTask(SelectedTask);
 
-                SelectedTask.IsZombieCheckEnabled = originalZombie;
                 SelectedTask.Arguments = originalArgs;
             }
             catch (Exception ex) { Log("错误", "调试异常: " + ex.Message); }

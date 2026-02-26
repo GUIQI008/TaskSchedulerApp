@@ -16,7 +16,28 @@ namespace TaskSchedulerApp
 
         private void TestPush_Click(object sender, RoutedEventArgs e)
         {
-            HandyControl.Controls.MessageBox.Info("请在任务运行时测试，或检查 Bark URL 是否正确。");
+            if (string.IsNullOrWhiteSpace(_settings.BarkUrl))
+            {
+                HandyControl.Controls.MessageBox.Warning("请先填写 Bark Server URL");
+                return;
+            }
+
+            Task.Run(async () =>
+            {
+                try
+                {
+                    var service = new TaskSchedulerApp.Services.AutomationService(_settings, (t, m) => { });
+                    await service.SendBark("GameSchedule 测试推送", "Ciallo⁓\nBark 配置正确！✅");
+
+                    Dispatcher.Invoke(() =>
+                        HandyControl.Controls.MessageBox.Success("测试推送已发送！请检查手机。"));
+                }
+                catch
+                {
+                    Dispatcher.Invoke(() =>
+                        HandyControl.Controls.MessageBox.Error("推送失败，请检查网络或Bark URL"));
+                }
+            });
         }
 
         private void SelectScreenshotFolder_Click(object sender, RoutedEventArgs e)
@@ -28,7 +49,6 @@ namespace TaskSchedulerApp
             }
         }
 
-        // 选择日志路径
         private void SelectLogFolder_Click(object sender, RoutedEventArgs e)
         {
             var dlg = new System.Windows.Forms.FolderBrowserDialog();
