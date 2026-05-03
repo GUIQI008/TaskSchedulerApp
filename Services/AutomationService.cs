@@ -179,12 +179,24 @@ namespace TaskSchedulerApp.Services
                 Log("任务", "等待 3 秒窗口稳定...");
                 await Task.Delay(3000);
 
-                #region 模拟点击
-                if (task.PosX != 0 || task.PosY != 0)
+                #region 宏动作回放
+                if (task.Actions != null && task.Actions.Count > 0)
                 {
-                    Log("操作", $"模拟点击坐标: ({task.PosX}, {task.PosY})");
-                    Thread.Sleep(500);
-                    NativeMethods.ClickLeft(task.PosX, task.PosY);
+                    Log("操作", $"开始执行宏操作，共 {task.Actions.Count} 步...");
+                    foreach (var action in task.Actions)
+                    {
+                        if (_stopRequested) break;
+
+                        // 1. 等待录制时的时间间隔
+                        if (action.DelayBefore > 0)
+                        {
+                            await Task.Delay(action.DelayBefore);
+                        }
+
+                        // 2. 执行具体动作
+                        InputSimulator.ExecuteAction(action);
+                    }
+                    Log("操作", "宏操作执行完毕！");
                 }
                 #endregion
 

@@ -55,7 +55,7 @@ namespace TaskSchedulerApp
 
         private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
-            await UpdateManager.CheckOnStartup();
+            
         }
 
         public void HideWindow()
@@ -160,9 +160,13 @@ namespace TaskSchedulerApp
             {
                 _lastHotkeyTime = DateTime.Now;
                 var point = WinForms.Cursor.Position;
-                _viewModel.SelectedTask.PosX = point.X;
-                _viewModel.SelectedTask.PosY = point.Y;
-                _viewModel.Log("操作", $"已录制坐标: {point.X}, {point.Y}");
+
+                // 将鼠标移动、按下、抬起作为一个完整的点击操作添加到宏列表中
+                _viewModel.SelectedTask.Actions.Add(new MacroAction { ActionType = MacroActionType.MouseMove, X = point.X, Y = point.Y, DelayBefore = 500, Description = "移动到目标" });
+                _viewModel.SelectedTask.Actions.Add(new MacroAction { ActionType = MacroActionType.MouseLeftDown, X = point.X, Y = point.Y, DelayBefore = 200, Description = "左键按下" });
+                _viewModel.SelectedTask.Actions.Add(new MacroAction { ActionType = MacroActionType.MouseLeftUp, X = point.X, Y = point.Y, DelayBefore = 50, Description = "左键抬起" });
+
+                _viewModel.Log("操作", $"已录制坐标点位到动作列表: {point.X}, {point.Y}");
                 _viewModel.SaveConfigCommand.Execute(null);
             }
 
@@ -238,7 +242,18 @@ namespace TaskSchedulerApp
 
             StartTaskCommand = new RelayCommand(StartTasks);
             StopTaskCommand = new RelayCommand(() => { try { _runner?.RequestStop(); } catch (Exception ex) { Log("错误", ex.Message); } });
-            TestClickCommand = new RelayCommand(() => { if (SelectedTask != null) NativeMethods.ClickLeft(SelectedTask.PosX, SelectedTask.PosY); });
+            TestClickCommand = new RelayCommand(async () => {
+                if (SelectedTask != null && SelectedTask.Actions != null)
+                {
+                    Log("测试", "开始回放测试...");
+                    foreach (var action in SelectedTask.Actions)
+                    {
+                        if (action.DelayBefore > 0) await Task.Delay(action.DelayBefore);
+                        InputSimulator.ExecuteAction(action);
+                    }
+                    Log("测试", "回放测试结束。");
+                }
+            });
             ShowImageLogCommand = new RelayCommand(() => new ImageLogWindow(Settings.ScreenshotPath).Show());
             DebugRunCommand = new RelayCommand(DebugRun);
             OpenProgramCommand = new RelayCommand(OpenProgram);

@@ -1,0 +1,51 @@
+name: Build and Release Installer
+
+# 触发条件：当推送以 "v" 开头的 tag 时执行（例如 v1.0.0, v2.1.0）
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    
+    # 必须赋予写权限才能创建 Release
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0' # 根据你的项目 .NET 版本修改，例如 7.0.x, 8.0.x 等
+
+    - name: Publish WPF App
+      # 将 WPF 项目编译为独立文件夹，存放在名为 publish 的目录中
+      # 注意：如果你的 .csproj 不在根目录，请把 TaskSchedulerApp.csproj 换成相对路径，比如 src/TaskSchedulerApp.csproj
+      run: dotnet publish TaskSchedulerApp.csproj -c Release -r win-x64 --self-contained false -o publish
+
+    - name: Get Version From Tag
+      id: get_version
+      # 将标签名字(如 v2.1.0) 提取出来，供打包工具使用
+      run: |
+        $TAG_NAME = "${{ github.ref_name }}"
+        # 去掉开头的字母 v
+        $VERSION = $TAG_NAME.TrimStart('v','V')
+        echo "VERSION=$VERSION" >> $env:GITHUB_ENV
+
+    - name: Compile Inno Setup Installer
+      # GitHub 的 windows 机器自带 Inno Setup，我们直接调用它，并把刚才提取的版本号传进去
+      run: |
+        & "C:\Program Files (x86)\Inno Setup 6\iscc.exe" "/DAppVersion=${{ env.VERSION }}" installer.iss
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: Output/TaskSchedulerApp_Installer.exe # 上传打包好的安装包
+        generate_release_notes: true # 自动生成更新日志
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

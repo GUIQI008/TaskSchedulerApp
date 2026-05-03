@@ -12,6 +12,28 @@ namespace TaskSchedulerApp.Models
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
     }
 
+    public enum MacroActionType
+    {
+        Delay, MouseMove, MouseLeftDown, MouseLeftUp, MouseRightDown, MouseRightUp, KeyDown, KeyUp
+    }
+
+    public class MacroAction : ObservableObject
+    {
+        private MacroActionType _actionType;
+        private int _delayBefore;
+        private int _x;
+        private int _y;
+        private int _keyCode;
+        private string _description = "";
+
+        public MacroActionType ActionType { get => _actionType; set { _actionType = value; OnPropertyChanged(); } }
+        public int DelayBefore { get => _delayBefore; set { _delayBefore = value; OnPropertyChanged(); } }
+        public int X { get => _x; set { _x = value; OnPropertyChanged(); } }
+        public int Y { get => _y; set { _y = value; OnPropertyChanged(); } }
+        public int KeyCode { get => _keyCode; set { _keyCode = value; OnPropertyChanged(); } }
+        public string Description { get => _description; set { _description = value; OnPropertyChanged(); } }
+    }
+
     public class TaskItem : ObservableObject
     {
         private string name = "新任务";
@@ -22,11 +44,12 @@ namespace TaskSchedulerApp.Models
         private string processNames = "";
         private string extraProcessNames = "";
         private int runTime = 60;
-        private int posX = 0;
-        private int posY = 0;
         private string status = "等待中";
         private string extraStartPath = "";
         private string extraStartArguments = "";
+
+        // 【新增】录制的动作集合
+        private ObservableCollection<MacroAction> actions = new ObservableCollection<MacroAction>();
 
         public string Name { get => name; set { name = value; OnPropertyChanged(); } }
         public string Path { get => path; set { path = value; OnPropertyChanged(); } }
@@ -38,12 +61,12 @@ namespace TaskSchedulerApp.Models
 
         public string ExtraProcessNames { get => extraProcessNames; set { extraProcessNames = value; OnPropertyChanged(); } }
         public int RunTime { get => runTime; set { runTime = value; OnPropertyChanged(); } }
-        public int PosX { get => posX; set { posX = value; OnPropertyChanged(); } }
-        public int PosY { get => posY; set { posY = value; OnPropertyChanged(); } }
         public string Status { get => status; set { status = value; OnPropertyChanged(); } }
 
         public string ExtraStartPath { get => extraStartPath; set { extraStartPath = value; OnPropertyChanged(); } }
         public string ExtraStartArguments { get => extraStartArguments; set { extraStartArguments = value; OnPropertyChanged(); } }
+
+        public ObservableCollection<MacroAction> Actions { get => actions; set { actions = value; OnPropertyChanged(); } }
     }
 
     public class AppSettings : ObservableObject

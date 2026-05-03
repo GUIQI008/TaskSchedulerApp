@@ -5,24 +5,25 @@
            xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
            xmlns:hc="https://handyorg.github.io/handycontrol"
            mc:Ignorable="d"
-           Title="关于应用" Height="450" Width="380"
+           Title="关于应用" Height="514" Width="380"
            WindowStartupLocation="CenterOwner"
            ResizeMode="NoResize"
            ShowInTaskbar="False"
            Background="{DynamicResource SecondaryRegionBrush}">
 
-    <Border Margin="20" Background="{DynamicResource RegionBrush}" CornerRadius="10" Effect="{StaticResource EffectShadow2}">
-        <Grid>
+    <Border Margin="26,20,20,0" Background="{DynamicResource RegionBrush}" CornerRadius="10" Effect="{StaticResource EffectShadow2}" Height="458" VerticalAlignment="Top">
+        <Grid Height="451" VerticalAlignment="Top">
             <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto" MinHeight="148.37"/>
                 <!-- Logo & Title -->
-                <RowDefinition Height="*"/>
+                <RowDefinition Height="167*"/>
+                <RowDefinition/>
                 <!-- Message -->
-                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto" MinHeight="50.434"/>
                 <!-- QR Codes -->
             </Grid.RowDefinitions>
 
-            <StackPanel Grid.Row="0" HorizontalAlignment="Center" Margin="0,25,0,15">
+            <StackPanel Grid.Row="0" HorizontalAlignment="Center" Margin="0,20,0,20" Width="146">
 
                 <Image Source="/Resources/ico.png"
        Width="60" 
@@ -40,15 +41,20 @@
 
             <!-- 2. 开发者寄语 -->
             <TextBlock TextWrapping="Wrap" TextAlignment="Center" 
-                       Foreground="#888" FontSize="13" LineHeight="20" Margin="30,158,30,0"
-                       VerticalAlignment="Top" Height="87" Grid.RowSpan="3">
+                       Foreground="#888" FontSize="13" LineHeight="20" Margin="30,8,30,0"
+                       VerticalAlignment="Top" Height="63" Grid.Row="1">
                 感谢使用本工具！<LineBreak/>
                 如果这个工具帮助到了你，<LineBreak/>
                 欢迎请作者喝一杯咖啡 ☕
             </TextBlock>
 
+            <Button x:Name="BtnCheckUpdate" Grid.Row="3" Content="检查更新" 
+                Style="{StaticResource ButtonPrimary}" Height="40" 
+                Click="BtnCheckUpdate_Click" hc:BorderElement.CornerRadius="6" Width="70"/>
+
+
             <!-- 3. 捐赠区域 -->
-            <Grid Grid.Row="2" Margin="0,0,0,25">
+            <Grid Grid.Row="1" Margin="0,74,0,10">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
@@ -58,7 +64,7 @@
                     <!-- 微信 -->
                     <StackPanel HorizontalAlignment="Center" Margin="5">
                         <Border CornerRadius="8" BorderThickness="1" BorderBrush="#EEE" Background="White" Padding="5">
-                            <Image Source="/Resources/wx.jpg" Width="100" Height="108" RenderOptions.BitmapScalingMode="HighQuality"/>
+                            <Image Source="/Resources/wx.jpg" Width="110" Height="110" RenderOptions.BitmapScalingMode="HighQuality"/>
                         </Border>
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,5,0,0">
                             <Path Data="M12 2C6.5 2 2 6 2 11c0 2.8 2.1 5.2 5.3 6.5.1.8-.5 2.5-1.3 3.4 1.8 0 3.7-1.1 5-2.2.3.1.7.1 1 .1 5.5 0 10-4 10-9S17.5 2 12 2z" 
@@ -67,10 +73,11 @@
                         </StackPanel>
                     </StackPanel>
 
+
                     <!-- 支付宝 -->
                     <StackPanel HorizontalAlignment="Center" Margin="5">
                         <Border CornerRadius="8" BorderThickness="1" BorderBrush="#EEE" Background="White" Padding="5">
-                            <Image Source="/Resources/zfb.jpg" Width="100" Height="108" RenderOptions.BitmapScalingMode="HighQuality"/>
+                            <Image Source="/Resources/zfb.jpg" Width="110" Height="110" RenderOptions.BitmapScalingMode="HighQuality"/>
                         </Border>
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,5,0,0">
                             <Path Data="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z" 
@@ -79,6 +86,7 @@
                         </StackPanel>
                     </StackPanel>
                 </UniformGrid>
+
             </Grid>
         </Grid>
     </Border>

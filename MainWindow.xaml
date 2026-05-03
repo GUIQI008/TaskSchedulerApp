@@ -153,21 +153,45 @@
                                 <hc:TextBox Grid.Column="2" hc:InfoElement.Title="最大运行时间 (分钟)" Text="{Binding SelectedTask.RunTime, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource TextBoxExtend}"/>
                             </Grid>
 
-                            <hc:Divider Content="模拟操作 (可选)" Margin="0,20,0,15"/>
-                            <Border BorderThickness="1" BorderBrush="{DynamicResource BorderBrush}" CornerRadius="6" Padding="15" Background="{DynamicResource SecondaryRegionBrush}">
+                            <hc:Divider Content="宏动作录制 (可选)" Margin="0,20,0,15"/>
+                            <Border BorderThickness="1" BorderBrush="{DynamicResource BorderBrush}" CornerRadius="6" Padding="10" Background="{DynamicResource SecondaryRegionBrush}">
                                 <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="15"/>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <hc:TextBox Grid.Column="0" hc:InfoElement.Title="X 坐标" Text="{Binding SelectedTask.PosX, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource TextBoxExtend}"/>
-                                    <hc:TextBox Grid.Column="2" hc:InfoElement.Title="Y 坐标" Text="{Binding SelectedTask.PosY, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource TextBoxExtend}"/>
-                                    <StackPanel Grid.Column="3" Orientation="Vertical" VerticalAlignment="Bottom" Margin="15,0,0,2">
-                                        <Button Content="🖱 测试点击" Command="{Binding TestClickCommand}" Style="{StaticResource ButtonInfo}" Width="100"/>
-                                        <TextBlock Text="按 F9 录制坐标" HorizontalAlignment="Center" FontSize="10" Foreground="Gray" Margin="0,4,0,0"/>
-                                    </StackPanel>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="180"/>
+                                        <!-- 限制表格高度，防止页面拉得过长 -->
+                                    </Grid.RowDefinitions>
+
+                                    <!-- 顶部说明和按钮 -->
+                                    <Grid Grid.Row="0" Margin="0,0,0,10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Orientation="Vertical" VerticalAlignment="Center">
+                                            <TextBlock Text="💡 将鼠标移动到目标位置，按下 F9 即可录制一次点击操作。" Foreground="#777" FontWeight="Bold"/>
+                                            <TextBlock Text="提示: 可以在下方表格中直接修改坐标、延迟时间，或选中行按 Delete 键删除。" Foreground="#999" FontSize="11" Margin="0,2,0,0"/>
+                                        </StackPanel>
+                                        <Button Grid.Column="1" Content="🖱 测试回放" Command="{Binding TestClickCommand}" Style="{StaticResource ButtonInfo}" Width="100" hc:BorderElement.CornerRadius="4"/>
+                                    </Grid>
+
+                                    <!-- 动作序列表格 -->
+                                    <DataGrid Grid.Row="1" 
+                                              ItemsSource="{Binding SelectedTask.Actions}" 
+                                              AutoGenerateColumns="False" 
+                                              CanUserAddRows="False" 
+                                              HeadersVisibility="Column"
+                                              Background="{DynamicResource RegionBrush}"
+                                              BorderBrush="{DynamicResource BorderBrush}"
+                                              BorderThickness="1">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="动作类型" Binding="{Binding ActionType}" IsReadOnly="True" Width="100"/>
+                                            <DataGridTextColumn Header="X 坐标" Binding="{Binding X}" Width="70"/>
+                                            <DataGridTextColumn Header="Y 坐标" Binding="{Binding Y}" Width="70"/>
+                                            <DataGridTextColumn Header="前置延迟(ms)" Binding="{Binding DelayBefore}" Width="100"/>
+                                            <DataGridTextColumn Header="描述" Binding="{Binding Description}" Width="*"/>
+                                        </DataGrid.Columns>
+                                    </DataGrid>
                                 </Grid>
                             </Border>
                             <Rectangle Height="20"/>
