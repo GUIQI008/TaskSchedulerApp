@@ -201,25 +201,21 @@ namespace TaskSchedulerApp
             var task = _viewModel.SelectedTask;
             if (task == null) return;
 
-            // 获取鼠标当前悬停的 WPF 元素
-            var element = Mouse.DirectlyOver as DependencyObject;
-            if (element == null)
-            {
-                _viewModel.Log("警告", "F8：无法检测到目标输入框，请将鼠标移至输入框上方再按 F8。");
-                return;
-            }
+            // 获取当前键盘焦点所在元素
+            var focusedElement = FocusManager.GetFocusedElement(this) as FrameworkElement;
+            if (focusedElement == null) return;
 
-            // 沿视觉树查找目标 TextBox
-            bool isGameTitle = FindParentByName(element, "GameTitleBox") != null;
-            bool isMacroTitle = FindParentByName(element, "MacroTitleBox") != null;
+            // 判断焦点是否在游戏标题框或脚本标题框
+            bool isGameTitle = focusedElement.Name == "GameTitleBox";
+            bool isMacroTitle = focusedElement.Name == "MacroTitleBox";
 
             if (!isGameTitle && !isMacroTitle)
             {
-                _viewModel.Log("提示", "F8：请将鼠标悬停在“游戏窗口标题”或“脚本窗口标题”输入框上再按。");
+                _viewModel.Log("提示", "请先点击「游戏窗口标题」或「脚本窗口标题」输入框，再将鼠标移动到目标窗口上按 F8。");
                 return;
             }
 
-            // 抓取鼠标屏幕坐标的窗口标题
+            // 抓取鼠标屏幕位置所在窗口标题
             var screenPoint = WinForms.Cursor.Position;
             string title = NativeMethods.GetWindowTitleFromPoint(screenPoint.X, screenPoint.Y);
             if (string.IsNullOrWhiteSpace(title))
@@ -228,17 +224,13 @@ namespace TaskSchedulerApp
                 return;
             }
 
+            // 填入对应字段
             if (isGameTitle)
-            {
                 task.WindowTitle = title;
-                _viewModel.Log("操作", $"F8 抓取游戏窗口标题: [{title}]");
-            }
             else
-            {
                 task.MacroWindowTitle = title;
-                _viewModel.Log("操作", $"F8 抓取脚本窗口标题: [{title}]");
-            }
-            // 仅修改内存，不立即保存（保存由用户手动或关闭时触发）
+
+            _viewModel.Log("操作", $"F8 抓取{(isGameTitle ? "游戏" : "脚本")}窗口标题: [{title}]");
         }
 
         /// <summary>
