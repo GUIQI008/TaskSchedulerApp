@@ -110,7 +110,7 @@
                                             <ColumnDefinition Width="150"/>
                                         </Grid.ColumnDefinitions>
                                         <hc:TextBox Grid.Column="0" hc:InfoElement.Title="任务名称" Text="{Binding SelectedTask.Name, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource TextBoxExtend}"/>
-                                        <hc:TextBox Grid.Column="2" hc:InfoElement.Title="最大运行时间 (分钟)" Text="{Binding SelectedTask.RunTime, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource TextBoxExtend}" hc:InfoElement.Placeholder="到点自动结束"/>
+                                        <hc:TextBox Grid.Column="2" hc:InfoElement.Title="任务运行时间 (分钟)" Text="{Binding SelectedTask.RunTime, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource TextBoxExtend}" hc:InfoElement.Placeholder="到点自动结束"/>
                                     </Grid>
                                 </StackPanel>
                             </Border>
@@ -118,7 +118,7 @@
                             <!-- ================= 2. 游戏程序卡片 ================= -->
                             <Border Background="{DynamicResource SecondaryRegionBrush}" CornerRadius="8" Padding="15" Margin="0,0,0,15" BorderThickness="1" BorderBrush="{DynamicResource BorderBrush}">
                                 <StackPanel>
-                                    <TextBlock Text="🎮 步骤一：前置游戏程序 (可选)" FontWeight="Bold" FontSize="14" Margin="0,0,0,12" Foreground="{DynamicResource PrimaryTextBrush}"/>
+                                    <TextBlock Text="🎮 步骤一：游戏程序 (可选)" FontWeight="Bold" FontSize="14" Margin="0,0,0,12" Foreground="{DynamicResource PrimaryTextBrush}"/>
                                     <Grid Margin="0,0,0,10">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
@@ -134,7 +134,7 @@
                                             <ColumnDefinition Width="15"/>
                                             <ColumnDefinition Width="150"/>
                                         </Grid.ColumnDefinitions>
-                                        <hc:TextBox Grid.Column="0" hc:InfoElement.Title="游戏窗口标题 (Title)" Text="{Binding SelectedTask.WindowTitle, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource TextBoxExtend}" hc:InfoElement.Placeholder="精确匹配，用于判断游戏启动成功"/>
+                                        <hc:TextBox Grid.Column="0" hc:InfoElement.Title="游戏窗口标题" Text="{Binding SelectedTask.WindowTitle, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource TextBoxExtend}" hc:InfoElement.Placeholder="精确匹配，用于判断游戏启动成功"/>
                                         <hc:TextBox Grid.Column="2" hc:InfoElement.Title="寻找超时 (秒)" Text="{Binding SelectedTask.RecognitionTimeout, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource TextBoxExtend}"/>
                                     </Grid>
                                 </StackPanel>
@@ -143,13 +143,13 @@
                             <!-- ================= 3. 脚本程序卡片 ================= -->
                             <Border Background="{DynamicResource SecondaryRegionBrush}" CornerRadius="8" Padding="15" Margin="0,0,0,15" BorderThickness="1" BorderBrush="{DynamicResource BorderBrush}">
                                 <StackPanel>
-                                    <TextBlock Text="🤖 步骤二：脚本/辅助工具 (可选)" FontWeight="Bold" FontSize="14" Margin="0,0,0,12" Foreground="{DynamicResource PrimaryTextBrush}"/>
+                                    <TextBlock Text="🤖 步骤二：脚本程序" FontWeight="Bold" FontSize="14" Margin="0,0,0,12" Foreground="{DynamicResource PrimaryTextBrush}"/>
                                     <Grid Margin="0,0,0,10">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
                                             <ColumnDefinition Width="Auto"/>
                                         </Grid.ColumnDefinitions>
-                                        <hc:TextBox Grid.Column="0" hc:InfoElement.Title="程序路径" Text="{Binding SelectedTask.Path}" Style="{StaticResource TextBoxExtend}" hc:InfoElement.Placeholder="外挂、脚本辅助工具的路径..."/>
+                                        <hc:TextBox Grid.Column="0" hc:InfoElement.Title="程序路径" Text="{Binding SelectedTask.Path}" Style="{StaticResource TextBoxExtend}" hc:InfoElement.Placeholder="脚本辅助工具的路径..."/>
                                         <Button Grid.Column="1" Content="📂" Command="{Binding BrowseFileCommand}" Margin="8,26,0,0" Width="40" Height="30"/>
                                     </Grid>
                                     <hc:TextBox hc:InfoElement.Title="启动参数" Text="{Binding SelectedTask.Arguments, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource TextBoxExtend}" Margin="0,0,0,10"/>
@@ -159,7 +159,7 @@
                                             <ColumnDefinition Width="15"/>
                                             <ColumnDefinition Width="150"/>
                                         </Grid.ColumnDefinitions>
-                                        <hc:TextBox Grid.Column="0" hc:InfoElement.Title="脚本窗口标题 (宏霸体防遮挡专用)" Text="{Binding SelectedTask.ScriptWindowTitle, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource TextBoxExtend}" hc:InfoElement.Placeholder="必须填准，宏点击时靠它置顶防遮挡！"/>
+                                        <hc:TextBox Grid.Column="0" hc:InfoElement.Title="脚本窗口标题" Text="{Binding SelectedTask.ScriptWindowTitle, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource TextBoxExtend}" hc:InfoElement.Placeholder="必须填准，宏点击时靠它置顶防遮挡！"/>
                                         <hc:TextBox Grid.Column="2" hc:InfoElement.Title="寻找超时 (秒)" Text="{Binding SelectedTask.ScriptRecognitionTimeout, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource TextBoxExtend}"/>
                                     </Grid>
                                 </StackPanel>
@@ -168,15 +168,15 @@
                             <!-- ================= 4. 进程监控卡片 ================= -->
                             <Border Background="{DynamicResource SecondaryRegionBrush}" CornerRadius="8" Padding="15" Margin="0,0,0,15" BorderThickness="1" BorderBrush="{DynamicResource BorderBrush}">
                                 <StackPanel>
-                                    <TextBlock Text="🛡 进程监控与防断线" FontWeight="Bold" FontSize="14" Margin="0,0,0,12" Foreground="{DynamicResource PrimaryTextBrush}"/>
+                                    <TextBlock Text="🛡 进程监控与管理" FontWeight="Bold" FontSize="14" Margin="0,0,0,12" Foreground="{DynamicResource PrimaryTextBrush}"/>
                                     <Grid>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
                                             <ColumnDefinition Width="15"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
-                                        <hc:TextBox Grid.Column="0" hc:InfoElement.Title="监控进程 (逗号分隔)" Text="{Binding SelectedTask.ProcessNames, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource TextBoxExtend}" hc:InfoElement.Placeholder="丢失后立刻终止任务"/>
-                                        <hc:TextBox Grid.Column="2" hc:InfoElement.Title="结束强制查杀 (逗号分隔)" Text="{Binding SelectedTask.ExtraProcessNames, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource TextBoxExtend}" hc:InfoElement.Placeholder="防止残留进程占用内存"/>
+                                        <hc:TextBox Grid.Column="0" hc:InfoElement.Title="监控进程 (逗号分隔)" Text="{Binding SelectedTask.ProcessNames, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource TextBoxExtend}" hc:InfoElement.Placeholder="丢失后跳过当前任务"/>
+                                        <hc:TextBox Grid.Column="2" hc:InfoElement.Title="结束强制查杀 (逗号分隔)" Text="{Binding SelectedTask.ExtraProcessNames, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource TextBoxExtend}" hc:InfoElement.Placeholder="任务结束后需要关闭的进程"/>
                                     </Grid>
                                 </StackPanel>
                             </Border>
@@ -195,7 +195,7 @@
                                             <TextBlock Text="💡 按 F9 录制单击，或按 Ctrl+F9 开启连点录制。" Foreground="{DynamicResource PrimaryBrush}" FontWeight="Bold"/>
                                             <TextBlock Text="提示: 列表中可双击修改参数，选中行按 Delete 键删除。" Foreground="Gray" FontSize="11" Margin="0,2,0,0"/>
                                         </StackPanel>
-                                        <Button Grid.Column="1" Content="🗑 清空" Command="{Binding ClearMacrosCommand}" Style="{StaticResource ButtonDanger}" Width="60" Margin="0,0,10,0" hc:BorderElement.CornerRadius="4"/>
+                                        <Button Grid.Column="1" Content="清空" Command="{Binding ClearMacrosCommand}" Style="{StaticResource ButtonDanger}" Width="60" Margin="0,0,10,0" hc:BorderElement.CornerRadius="4"/>
                                         <Button Grid.Column="2" Content="▶ 测试回放" Command="{Binding TestClickCommand}" Style="{StaticResource ButtonPrimary}" Width="90" hc:BorderElement.CornerRadius="4"/>
                                     </Grid>
 

@@ -180,7 +180,7 @@ namespace TaskSchedulerApp
             {
                 _isContinuousRecording = !_isContinuousRecording;
                 _lastClickTime = DateTime.Now;
-                _viewModel.Log("操作", _isContinuousRecording ? "🔴 已开启连续录制，尽情点击吧！" : "⏹ 连续录制结束！");
+                _viewModel.Log("操作", _isContinuousRecording ? "🔴 已开启连续录制，请点击目标位置！" : "⏹ 连续录制结束！");
                 if (!_isContinuousRecording) _viewModel.SaveConfigCommand.Execute(null);
             }
             // 2. 处理单点 F9 录制

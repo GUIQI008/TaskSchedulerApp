@@ -7,7 +7,6 @@ using TaskSchedulerApp.Models;
 
 namespace TaskSchedulerApp
 {
-    // 【注意修改点1】：这里不再继承 HandyControl.Controls.Window，而是继承原生 Window
     public partial class AdvancedSettingsWindow : Window
     {
         private AppSettings _settings;
@@ -19,7 +18,6 @@ namespace TaskSchedulerApp
             DataContext = _settings;
         }
 
-        // 【注意修改点2】：新增拖拽窗口的方法
         private void DragWindow_MouseDown(object sender, MouseButtonEventArgs e)
         {
             if (e.ChangedButton == MouseButton.Left)
@@ -41,14 +39,14 @@ namespace TaskSchedulerApp
                 {
                     using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
                     string barkUrl = _settings.BarkUrl.TrimEnd('/');
-                    string url = $"{barkUrl}/{Uri.EscapeDataString("测试推送")}/{Uri.EscapeDataString("配置正确！")}";
+                    string url = $"{barkUrl}/{Uri.EscapeDataString("测试推送")}/{Uri.EscapeDataString("Ciallo⁓\n 推送成功！✅")}";
                     if (!string.IsNullOrWhiteSpace(_settings.BarkIcon))
                         url += $"?icon={Uri.EscapeDataString(_settings.BarkIcon)}";
 
                     var response = await client.GetAsync(url);
                     response.EnsureSuccessStatusCode();
 
-                    Dispatcher.Invoke(() => HandyControl.Controls.MessageBox.Success("Ciallo⁓\n 推送成功！✅"));
+                    Dispatcher.Invoke(() => HandyControl.Controls.MessageBox.Success("推送成功！"));
                 }
                 catch
                 {
