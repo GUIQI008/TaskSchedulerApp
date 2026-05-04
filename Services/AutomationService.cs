@@ -180,22 +180,86 @@ namespace TaskSchedulerApp.Services
                 await Task.Delay(3000);
 
                 #region 宏动作回放
+                // 原代码段（约第 70-95 行）替换为：
                 if (task.Actions != null && task.Actions.Count > 0)
                 {
                     Log("操作", $"开始执行宏操作，共 {task.Actions.Count} 步...");
+
+                    IntPtr targetHwnd = IntPtr.Zero;
+                    if (!string.IsNullOrWhiteSpace(task.MacroWindowTitle))
+                    {
+                        targetHwnd = NativeMethods.FindWindow(null, task.MacroWindowTitle);
+                        if (targetHwnd != IntPtr.Zero)
+                        {
+                            Log("系统", "已将脚本窗口置顶");
+                            if (NativeMethods.IsIconic(targetHwnd))
+                                NativeMethods.ShowWindow(targetHwnd, NativeMethods.SW_RESTORE);
+                            NativeMethods.SetForegroundWindow(targetHwnd);
+                            NativeMethods.SetWindowPos(targetHwnd, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0,
+                                NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE);
+                        }
+                        else
+                        {
+                            Log("警告", $"未找到脚本窗口 [{task.MacroWindowTitle}]，宏操作可能失效。");
+                        }
+                    }
+
                     foreach (var action in task.Actions)
                     {
                         if (_stopRequested) break;
 
-                        // 1. 等待录制时的时间间隔
-                        if (action.DelayBefore > 0)
+                        if (action.DelayBefore > 0) await Task.Delay(action.DelayBefore);
+
+                        // 转换坐标：如果提供了目标窗口，将客户区坐标转为屏幕坐标
+                        int screenX = action.X, screenY = action.Y;
+                        if (targetHwnd != IntPtr.Zero)
                         {
-                            await Task.Delay(action.DelayBefore);
+                            var pt = new System.Drawing.Point(action.X, action.Y);
+                            NativeMethods.ClientToScreen(targetHwnd, ref pt);
+                            screenX = pt.X;
+                            screenY = pt.Y;
                         }
 
-                        // 2. 执行具体动作
-                        InputSimulator.ExecuteAction(action);
+                        // 执行动作时使用屏幕坐标
+                        switch (action.ActionType)
+                        {
+
+                            case MacroActionType.MouseMove:
+                                NativeMethods.SetCursorPos(screenX, screenY);
+                                break;
+                            case MacroActionType.MouseLeftUp:
+                                NativeMethods.SetCursorPos(screenX, screenY);
+                                NativeMethods.mouse_event(NativeMethods.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+                                break;
+                            case MacroActionType.MouseRightUp:
+                                NativeMethods.SetCursorPos(screenX, screenY);
+                                NativeMethods.mouse_event(NativeMethods.MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0);
+                                break;
+                            default:
+                                InputSimulator.ExecuteAction(action);
+                                break;
+                            case MacroActionType.MouseLeftDown:
+                                NativeMethods.SetCursorPos(screenX, screenY);
+                                NativeMethods.mouse_event(NativeMethods.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+                                await Task.Delay(50);
+                                NativeMethods.mouse_event(NativeMethods.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+                                break;
+                            case MacroActionType.MouseRightDown:
+                                NativeMethods.SetCursorPos(screenX, screenY);
+                                NativeMethods.mouse_event(NativeMethods.MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0);
+                                await Task.Delay(50);
+                                NativeMethods.mouse_event(NativeMethods.MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0);
+                                break;
+                        }
                     }
+
+                    if (targetHwnd != IntPtr.Zero)
+                    {
+                        Log("系统", "已恢复脚本窗口正常层级");
+                        NativeMethods.SetWindowPos(targetHwnd, NativeMethods.HWND_NOTOPMOST, 0, 0, 0, 0,
+                            NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE);
+                    }
+
                     Log("操作", "宏操作执行完毕！");
                 }
                 #endregion

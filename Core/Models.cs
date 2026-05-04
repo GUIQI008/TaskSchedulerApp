@@ -47,6 +47,7 @@ namespace TaskSchedulerApp.Models
         private string status = "等待中";
         private string extraStartPath = "";
         private string extraStartArguments = "";
+        private string macroWindowTitle = "";
 
         // 【新增】录制的动作集合
         private ObservableCollection<MacroAction> actions = new ObservableCollection<MacroAction>();
@@ -65,6 +66,8 @@ namespace TaskSchedulerApp.Models
 
         public string ExtraStartPath { get => extraStartPath; set { extraStartPath = value; OnPropertyChanged(); } }
         public string ExtraStartArguments { get => extraStartArguments; set { extraStartArguments = value; OnPropertyChanged(); } }
+
+        public string MacroWindowTitle { get => macroWindowTitle; set { macroWindowTitle = value; OnPropertyChanged(); } }
 
         public ObservableCollection<MacroAction> Actions { get => actions; set { actions = value; OnPropertyChanged(); } }
     }

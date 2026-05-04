@@ -1,4 +1,5 @@
-﻿using System.Windows;
+﻿using System.Net.Http;
+using System.Windows;
 using TaskSchedulerApp.Models;
 
 namespace TaskSchedulerApp
@@ -14,28 +15,30 @@ namespace TaskSchedulerApp
             DataContext = _settings;
         }
 
-        private void TestPush_Click(object sender, RoutedEventArgs e)
+        private async void TestPush_Click(object sender, RoutedEventArgs e)
         {
             if (string.IsNullOrWhiteSpace(_settings.BarkUrl))
             {
                 HandyControl.Controls.MessageBox.Warning("请先填写 Bark Server URL");
                 return;
             }
-
-            Task.Run(async () =>
+            await Task.Run(async () =>
             {
                 try
                 {
-                    var service = new TaskSchedulerApp.Services.AutomationService(_settings, (t, m) => { });
-                    await service.SendBark("GameSchedule 测试推送", "Ciallo⁓\nBark 配置正确！✅");
-
-                    Dispatcher.Invoke(() =>
-                        HandyControl.Controls.MessageBox.Success("测试推送已发送！请检查手机。"));
+                    // 静态调用，避免实例化 AutomationService
+                    using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+                    string barkUrl = _settings.BarkUrl.TrimEnd('/');
+                    string url = $"{barkUrl}/{Uri.EscapeDataString("测试推送")}/{Uri.EscapeDataString("配置正确！")}";
+                    if (!string.IsNullOrWhiteSpace(_settings.BarkIcon))
+                        url += $"?icon={Uri.EscapeDataString(_settings.BarkIcon)}";
+                    var response = await client.GetAsync(url);
+                    response.EnsureSuccessStatusCode();
+                    Dispatcher.Invoke(() => HandyControl.Controls.MessageBox.Success("Ciallo⁓\n 推送成功！✅"));
                 }
                 catch
                 {
-                    Dispatcher.Invoke(() =>
-                        HandyControl.Controls.MessageBox.Error("推送失败，请检查网络或Bark URL"));
+                    Dispatcher.Invoke(() => HandyControl.Controls.MessageBox.Error("推送失败"));
                 }
             });
         }

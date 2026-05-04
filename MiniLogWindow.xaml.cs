@@ -40,7 +40,7 @@ namespace TaskSchedulerApp
 
             this.LocationChanged += (s, e) => SaveWindowState();
             this.SizeChanged += (s, e) => SaveWindowState();
-
+            this.MouseRightButtonDown += (s, e) => { this.Topmost = !this.Topmost; };
             this.Loaded += MiniLogWindow_Loaded;
             this.Closing += MiniLogWindow_Closing;
         }
@@ -83,7 +83,10 @@ namespace TaskSchedulerApp
         {
             if (e.ChangedButton == MouseButton.Left) this.DragMove();
         }
-
+        private void BtnHide_Click(object sender, RoutedEventArgs e)
+        {
+            this.Hide();
+        }
         private void Restore_MouseDoubleClick(object sender, MouseButtonEventArgs e) => TriggerRestore();
         private void RestoreButton_Click(object sender, RoutedEventArgs e) => TriggerRestore();
         private void TriggerRestore() { _restoreAction?.Invoke(); this.Close(); }

@@ -1,14 +1,26 @@
 ﻿using System;
 using System.Windows;
+using System.Windows.Input;
 
 namespace TaskSchedulerApp.Views
 {
-    public partial class AboutWindow : HandyControl.Controls.Window
+    public partial class AboutWindow : Window
     {
         public AboutWindow()
         {
             InitializeComponent();
             VersionText.Text = "当前版本: v" + UpdateManager.CurrentVersion;
+        }
+
+        private void TitleBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (e.ChangedButton == MouseButton.Left)
+                this.DragMove();
+        }
+
+        private void CloseButton_Click(object sender, RoutedEventArgs e)
+        {
+            this.Close();
         }
 
         private async void BtnCheckUpdate_Click(object sender, RoutedEventArgs e)
@@ -19,8 +31,8 @@ namespace TaskSchedulerApp.Views
             try
             {
                 await UpdateManager.CheckForUpdatesManual(
-                    onProgress: (msg) => {
-                        // 回到UI线程更新按钮文本
+                    onProgress: (msg) =>
+                    {
                         Dispatcher.Invoke(() => BtnCheckUpdate.Content = msg);
                     });
             }
