@@ -325,25 +325,41 @@ namespace TaskSchedulerApp.Services
             {
                 string clean = name.Trim().Replace(".exe", "", StringComparison.OrdinalIgnoreCase);
                 if (string.IsNullOrEmpty(clean)) continue;
+
                 try
                 {
                     foreach (var p in Process.GetProcessesByName(clean))
                     {
                         try
                         {
-                            // 必须检查 HasExited！过滤掉上一个任务残留的僵尸句柄
-                            if (!p.HasExited) list.Add(p);
+                            // 【关键修复1】强制刷新进程对象，获取系统最底层的实时状态
+                            p.Refresh();
+
+                            // 只有明确、没有报错地确认它没退出，才算活着
+                            if (!p.HasExited)
+                            {
+                                list.Add(p);
+                            }
                         }
-                        catch { list.Add(p); } // 遇到拒绝访问的情况默认认为它还活着
+                        catch
+                        {
+                            // 【关键修复2】如果报任何错（如拒绝访问、进程已释放），说明它已经在走死亡流程了。
+                            // 绝对不能把它加到 list 里！直接无视它。
+                        }
                     }
                 }
                 catch { }
             }
 
-            // 【兜底修复】：如果按名字没找到（或者没填名字），但主进程对象还活着，也算作存活
+            // 兜底：如果按名字没找到，但主进程对象还活着，也算作存活
             if (list.Count == 0 && mainProcess != null)
             {
-                try { if (!mainProcess.HasExited) list.Add(mainProcess); } catch { }
+                try
+                {
+                    mainProcess.Refresh();
+                    if (!mainProcess.HasExited) list.Add(mainProcess);
+                }
+                catch { }
             }
 
             return list;
