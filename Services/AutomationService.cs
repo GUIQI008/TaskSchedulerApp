@@ -1,10 +1,12 @@
 ﻿#nullable enable
 
+using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Net.Http;
+using System.Threading.Tasks;
 using TaskSchedulerApp.Core;
 using TaskSchedulerApp.Models;
 using System.Collections.Generic;
@@ -19,7 +21,8 @@ namespace TaskSchedulerApp.Services
         private volatile bool _stopRequested = false;
         private static readonly HttpClient _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
         private readonly object _logLock = new object();
-        private bool lastAliveState = true;
+
+        // 【已修复】：删除了全局的 lastAliveState，防止多个任务之间状态污染
 
         public bool IsStopRequested => _stopRequested;
 
@@ -122,7 +125,6 @@ namespace TaskSchedulerApp.Services
         public async Task RunSingleTask(TaskItem task)
         {
             Process? mainProcess = null;
-            lastAliveState = true; // 每次任务开始前重置状态
 
             try
             {
@@ -154,10 +156,13 @@ namespace TaskSchedulerApp.Services
                     try
                     {
                         mainProcess = Process.Start(new ProcessStartInfo { FileName = task.Path, Arguments = task.Arguments, UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(task.Path) ?? "" });
+
+                        // 【这里注意】：你的 task.ScriptRecognitionTimeout 我没看到定义，为了避免编译报错，我改用 task.RecognitionTimeout。
+                        // 如果你定义了 ScriptRecognitionTimeout，请把下面这行的 RecognitionTimeout 改回 ScriptRecognitionTimeout
                         if (!string.IsNullOrWhiteSpace(task.ScriptWindowTitle))
                         {
                             Log("任务", $"等待脚本窗口: [{task.ScriptWindowTitle}]");
-                            if (!await WaitForWindow(task.ScriptWindowTitle, task.ScriptRecognitionTimeout))
+                            if (!await WaitForWindow(task.ScriptWindowTitle, task.RecognitionTimeout))
                             {
                                 Log("错误", "脚本窗口检测超时，任务中断");
                                 KillRelatedProcesses(task, mainProcess);
@@ -211,42 +216,77 @@ namespace TaskSchedulerApp.Services
                 task.Status = "运行中";
                 Log("任务", $"开始监控运行，时长: {task.RunTime} 分钟");
                 DateTime endTime = DateTime.Now.AddMinutes(task.RunTime);
+
+                // 【核心修复】：全部采用局部变量
                 int missingCounter = 0;
+                bool lastAliveState = true;
+                bool hasTakenScreenshot = false;
+                bool hasDetectedOnce = false; // 宏宽限期：只要探测到一次，才允许判断丢失
 
                 while (DateTime.Now < endTime && !_stopRequested)
                 {
                     // 仅当配置了进程名时才去监控死活，否则纯挂机
                     if (!string.IsNullOrWhiteSpace(task.ProcessNames) || !string.IsNullOrWhiteSpace(task.ExtraProcessNames))
                     {
-                        var aliveProcesses = GetAliveProcesses(task);
+                        // 传入 mainProcess 配合新版强效判定
+                        var aliveProcesses = GetAliveProcesses(task, mainProcess);
                         bool currentlyAlive = aliveProcesses.Count > 0;
+
+                        if (currentlyAlive) hasDetectedOnce = true;
 
                         if (currentlyAlive != lastAliveState)
                         {
-                            Log("监控", currentlyAlive ? $"目标进程恢复" : "目标进程丢失（连续5秒结束任务）");
+                            Log("监控", currentlyAlive ? $"目标进程存在/恢复" : "目标进程丢失（连续5秒后将结束任务）");
                             lastAliveState = currentlyAlive;
                         }
 
                         if (!currentlyAlive)
                         {
-                            missingCounter++;
-                            if (missingCounter >= 5)
+                            // 必须曾探测到进程存活，才开始计算丢失
+                            // 防止宏还没把游戏启动起来就被判负
+                            if (hasDetectedOnce)
                             {
-                                Log("监控", $"{task.Name} 进程彻底丢失，结束当前任务");
-                                break;
+                                missingCounter++;
+                                if (missingCounter >= 5)
+                                {
+                                    Log("监控", $"{task.Name} 进程彻底丢失，结束当前任务");
+                                    break; // 【核心修复】：用 break 跳出，保证走下面的收尾和截图逻辑
+                                }
                             }
                         }
-                        else missingCounter = 0;
+                        else
+                        {
+                            missingCounter = 0; // 只要活着，重置计数
+                        }
                     }
+
+                    // 自动截图逻辑 (最后 60 秒)
+                    if (!hasTakenScreenshot && (endTime - DateTime.Now).TotalSeconds <= 60)
+                    {
+                        Log("任务", "任务进入最后一分钟，执行自动截图...");
+                        TakeScreenshot(task);
+                        hasTakenScreenshot = true;
+                    }
+
                     await Task.Delay(1000);
                 }
 
                 // 5. 结束收尾
+                // 【核心修复】：保底截图，防用户设定的时间太短或因进程丢失跳过截图
+                if (!hasTakenScreenshot && !_stopRequested)
+                {
+                    Log("任务", "执行最终检查截图...");
+                    TakeScreenshot(task);
+                }
+
                 task.Status = _stopRequested ? "手动停止" : "已完成";
                 KillRelatedProcesses(task, mainProcess);
                 await SendBark(task.Name, task.Status);
             }
-            finally { KillRelatedProcesses(task, mainProcess); }
+            finally
+            {
+                KillRelatedProcesses(task, mainProcess);
+            }
         }
 
         // 辅助检测窗口稳定的方法
@@ -270,86 +310,8 @@ namespace TaskSchedulerApp.Services
         #endregion
 
         #region 辅助方法
-        private async Task<(bool Success, Process? LaunchedProcess)> AttemptLaunch(TaskItem task)
-        {
-            Process? launchedProcess = null;
-
-            if (string.IsNullOrWhiteSpace(task.Path) || !File.Exists(task.Path))
-            {
-                Log("错误", "主程序路径无效或不存在");
-                return (false, null);
-            }
-
-            Log("系统", $"启动主程序: \"{task.Path}\" {task.Arguments}");
-
-            var psi = new ProcessStartInfo
-            {
-                FileName = task.Path,
-                Arguments = task.Arguments,
-                UseShellExecute = true,
-                WorkingDirectory = Path.GetDirectoryName(task.Path) ?? ""
-            };
-
-            try
-            {
-                launchedProcess = Process.Start(psi);
-                if (launchedProcess != null)
-                    Log("任务", $"主程序启动成功，PID: {launchedProcess.Id}，进程名: {launchedProcess.ProcessName}");
-            }
-            catch (Exception ex)
-            {
-                Log("错误", $"启动进程异常: {ex.Message}");
-                return (false, null);
-            }
-
-            if (string.IsNullOrWhiteSpace(task.WindowTitle))
-                return (true, launchedProcess);
-
-            Log("任务", $"开始窗口标题检测: \"{task.WindowTitle}\"，总时长 {task.RecognitionTimeout} 秒（需连续2次稳定）");
-
-            int requiredStability = 2;
-            int consecutiveCount = 0;
-
-            for (int i = 0; i < task.RecognitionTimeout; i++)
-            {
-                if (_stopRequested) return (false, launchedProcess);
-
-                IntPtr hwnd = NativeMethods.FindWindow(null, task.WindowTitle);
-                if (hwnd != IntPtr.Zero && NativeMethods.IsWindowVisible(hwnd))
-                {
-                    if (NativeMethods.IsIconic(hwnd))
-                        NativeMethods.ShowWindow(hwnd, NativeMethods.SW_RESTORE);
-
-                    NativeMethods.SetForegroundWindow(hwnd);
-                    consecutiveCount++;
-
-                    Log("监控", $"检测到目标窗口（连续 {consecutiveCount}/{requiredStability} 次）");
-
-                    if (consecutiveCount >= requiredStability)
-                    {
-                        NativeMethods.SetWindowPos(hwnd, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0,
-                            NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE);
-                        Log("任务", $"窗口稳定检测成功（连续 {requiredStability} 次），已置顶窗口");
-                        return (true, launchedProcess);
-                    }
-                }
-                else
-                {
-                    if (consecutiveCount > 0)
-                        Log("监控", "窗口短暂消失，重置稳定计数");
-
-                    consecutiveCount = 0;
-                }
-
-                await Task.Delay(1000);
-            }
-
-            Log("错误", $"窗口标题 \"{task.WindowTitle}\" 在 {task.RecognitionTimeout} 秒内未达到连续 {requiredStability} 次稳定");
-            Log("提示", "建议检查标题精确匹配（大小写、空格）或增大超时时间");
-            return (false, launchedProcess);
-        }
-
-        private List<Process> GetAliveProcesses(TaskItem task)
+        // 【核心修复】：升级版 GetAliveProcesses，严厉打击僵尸进程！
+        private List<Process> GetAliveProcesses(TaskItem task, Process? mainProcess)
         {
             var list = new List<Process>();
             var allNames = new List<string>();
@@ -363,9 +325,27 @@ namespace TaskSchedulerApp.Services
             {
                 string clean = name.Trim().Replace(".exe", "", StringComparison.OrdinalIgnoreCase);
                 if (string.IsNullOrEmpty(clean)) continue;
-                try { list.AddRange(Process.GetProcessesByName(clean)); }
+                try
+                {
+                    foreach (var p in Process.GetProcessesByName(clean))
+                    {
+                        try
+                        {
+                            // 必须检查 HasExited！过滤掉上一个任务残留的僵尸句柄
+                            if (!p.HasExited) list.Add(p);
+                        }
+                        catch { list.Add(p); } // 遇到拒绝访问的情况默认认为它还活着
+                    }
+                }
                 catch { }
             }
+
+            // 【兜底修复】：如果按名字没找到（或者没填名字），但主进程对象还活着，也算作存活
+            if (list.Count == 0 && mainProcess != null)
+            {
+                try { if (!mainProcess.HasExited) list.Add(mainProcess); } catch { }
+            }
+
             return list;
         }
 
