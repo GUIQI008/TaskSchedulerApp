@@ -12,25 +12,25 @@ namespace TaskSchedulerApp.Models
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
     }
 
+    // 动作枚举：我们只要简单的聚合点击
     public enum MacroActionType
     {
-        Delay, MouseMove, MouseLeftDown, MouseLeftUp, MouseRightDown, MouseRightUp, KeyDown, KeyUp
+        MouseLeftClick, MouseRightClick
     }
 
+    // 单个宏动作模型
     public class MacroAction : ObservableObject
     {
         private MacroActionType _actionType;
         private int _delayBefore;
         private int _x;
         private int _y;
-        private int _keyCode;
         private string _description = "";
 
         public MacroActionType ActionType { get => _actionType; set { _actionType = value; OnPropertyChanged(); } }
         public int DelayBefore { get => _delayBefore; set { _delayBefore = value; OnPropertyChanged(); } }
         public int X { get => _x; set { _x = value; OnPropertyChanged(); } }
         public int Y { get => _y; set { _y = value; OnPropertyChanged(); } }
-        public int KeyCode { get => _keyCode; set { _keyCode = value; OnPropertyChanged(); } }
         public string Description { get => _description; set { _description = value; OnPropertyChanged(); } }
     }
 
@@ -39,27 +39,36 @@ namespace TaskSchedulerApp.Models
         private string name = "新任务";
         private string path = "";
         private string arguments = "";
+
+        // 游戏/目标程序相关的属性
         private string windowTitle = "";
         private int recognitionTimeout = 15;
+
+        // 脚本/辅助工具相关的属性 (新增)
+        private string scriptWindowTitle = "";
+        private int scriptRecognitionTimeout = 15;
+
         private string processNames = "";
         private string extraProcessNames = "";
         private int runTime = 60;
         private string status = "等待中";
         private string extraStartPath = "";
         private string extraStartArguments = "";
-        private string macroWindowTitle = "";
 
-        // 【新增】录制的动作集合
+        // 宏动作列表 (替换了原有的 PosX 和 PosY)
         private ObservableCollection<MacroAction> actions = new ObservableCollection<MacroAction>();
 
         public string Name { get => name; set { name = value; OnPropertyChanged(); } }
         public string Path { get => path; set { path = value; OnPropertyChanged(); } }
         public string Arguments { get => arguments; set { arguments = value; OnPropertyChanged(); } }
+
         public string WindowTitle { get => windowTitle; set { windowTitle = value; OnPropertyChanged(); } }
-
         public int RecognitionTimeout { get => recognitionTimeout; set { recognitionTimeout = value; OnPropertyChanged(); } }
-        public string ProcessNames { get => processNames; set { processNames = value; OnPropertyChanged(); } }
 
+        public string ScriptWindowTitle { get => scriptWindowTitle; set { scriptWindowTitle = value; OnPropertyChanged(); } }
+        public int ScriptRecognitionTimeout { get => scriptRecognitionTimeout; set { scriptRecognitionTimeout = value; OnPropertyChanged(); } }
+
+        public string ProcessNames { get => processNames; set { processNames = value; OnPropertyChanged(); } }
         public string ExtraProcessNames { get => extraProcessNames; set { extraProcessNames = value; OnPropertyChanged(); } }
         public int RunTime { get => runTime; set { runTime = value; OnPropertyChanged(); } }
         public string Status { get => status; set { status = value; OnPropertyChanged(); } }
@@ -67,10 +76,9 @@ namespace TaskSchedulerApp.Models
         public string ExtraStartPath { get => extraStartPath; set { extraStartPath = value; OnPropertyChanged(); } }
         public string ExtraStartArguments { get => extraStartArguments; set { extraStartArguments = value; OnPropertyChanged(); } }
 
-        public string MacroWindowTitle { get => macroWindowTitle; set { macroWindowTitle = value; OnPropertyChanged(); } }
-
         public ObservableCollection<MacroAction> Actions { get => actions; set { actions = value; OnPropertyChanged(); } }
     }
+
 
     public class AppSettings : ObservableObject
     {

@@ -122,6 +122,7 @@ namespace TaskSchedulerApp.Services
         public async Task RunSingleTask(TaskItem task)
         {
             Process? mainProcess = null;
+            lastAliveState = true; // 每次任务开始前重置状态
 
             try
             {
@@ -129,218 +130,142 @@ namespace TaskSchedulerApp.Services
                 CleanOldScreenshots();
                 await SendBark(task.Name, "启动中...");
 
-                #region 额外启动程序
+                // 1. 先启动游戏(额外程序)并等待游戏窗口
                 if (!string.IsNullOrWhiteSpace(task.ExtraStartPath) && File.Exists(task.ExtraStartPath))
                 {
-                    Log("系统", $"执行额外启动程序: {task.ExtraStartPath} {task.ExtraStartArguments}");
+                    Log("系统", $"启动游戏: {task.ExtraStartPath}");
                     try
                     {
-                        var psi = new ProcessStartInfo
+                        Process.Start(new ProcessStartInfo { FileName = task.ExtraStartPath, Arguments = task.ExtraStartArguments, UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(task.ExtraStartPath) ?? "" });
+                        if (!string.IsNullOrWhiteSpace(task.WindowTitle))
                         {
-                            FileName = task.ExtraStartPath,
-                            Arguments = task.ExtraStartArguments,
-                            UseShellExecute = true,
-                            WorkingDirectory = Path.GetDirectoryName(task.ExtraStartPath) ?? ""
-                        };
-                        using var process = Process.Start(psi);
-                        if (process != null)
-                            Log("系统", $"额外程序启动成功，PID: {process.Id}");
-                        await Task.Delay(2000);
+                            Log("任务", $"等待游戏窗口: [{task.WindowTitle}]");
+                            if (!await WaitForWindow(task.WindowTitle, task.RecognitionTimeout))
+                                Log("错误", "游戏窗口检测超时！(将继续往下执行)");
+                        }
                     }
-                    catch (Exception ex) { Log("警告", $"额外启动失败: {ex.Message}"); }
+                    catch (Exception ex) { Log("警告", $"游戏启动失败: {ex.Message}"); }
                 }
-                #endregion
 
-                #region 启动主程序并捕获进程
-                var (launchSuccess, launchedProcess) = await AttemptLaunch(task);
-                mainProcess = launchedProcess;
-
-                if (!launchSuccess)
+                // 2. 后启动脚本(主程序)并等待脚本窗口
+                if (!string.IsNullOrWhiteSpace(task.Path) && File.Exists(task.Path))
                 {
-                    if (_stopRequested)
+                    Log("系统", $"启动脚本: {task.Path}");
+                    try
                     {
-                        Log("系统", $"{task.Name} 启动过程中被手动停止");
-                        task.Status = "手动停止";
-                        KillRelatedProcesses(task, mainProcess);
-                        return;
+                        mainProcess = Process.Start(new ProcessStartInfo { FileName = task.Path, Arguments = task.Arguments, UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(task.Path) ?? "" });
+                        if (!string.IsNullOrWhiteSpace(task.ScriptWindowTitle))
+                        {
+                            Log("任务", $"等待脚本窗口: [{task.ScriptWindowTitle}]");
+                            if (!await WaitForWindow(task.ScriptWindowTitle, task.ScriptRecognitionTimeout))
+                            {
+                                Log("错误", "脚本窗口检测超时，任务中断");
+                                KillRelatedProcesses(task, mainProcess);
+                                task.Status = "启动失败";
+                                return;
+                            }
+                        }
                     }
-
-                    Log("错误", $"{task.Name} 启动失败（窗口/进程未检测到），跳过任务");
-                    KillRelatedProcesses(task, mainProcess);
-                    task.Status = "启动失败";
-                    return;
+                    catch (Exception ex) { Log("错误", $"脚本启动异常: {ex.Message}"); return; }
                 }
 
-                Log("任务", mainProcess != null
-                    ? $"主程序启动成功，PID: {mainProcess.Id}，进程名: {mainProcess.ProcessName}"
-                    : "主程序启动成功（通过窗口检测确认）");
-                #endregion
-
-                Log("任务", "等待 3 秒窗口稳定...");
+                Log("任务", "程序加载完毕，等待 3 秒稳定...");
                 await Task.Delay(3000);
 
-                #region 宏动作回放
-                // 原代码段（约第 70-95 行）替换为：
+                // 3. 执行宏录制动作（包含防遮挡）
                 if (task.Actions != null && task.Actions.Count > 0)
                 {
                     Log("操作", $"开始执行宏操作，共 {task.Actions.Count} 步...");
 
                     IntPtr targetHwnd = IntPtr.Zero;
-                    if (!string.IsNullOrWhiteSpace(task.MacroWindowTitle))
+                    if (!string.IsNullOrWhiteSpace(task.ScriptWindowTitle))
                     {
-                        targetHwnd = NativeMethods.FindWindow(null, task.MacroWindowTitle);
+                        targetHwnd = NativeMethods.FindWindow(null, task.ScriptWindowTitle);
                         if (targetHwnd != IntPtr.Zero)
                         {
-                            Log("系统", "已将脚本窗口置顶");
-                            if (NativeMethods.IsIconic(targetHwnd))
-                                NativeMethods.ShowWindow(targetHwnd, NativeMethods.SW_RESTORE);
+                            Log("系统", "防遮挡：已将【脚本窗口】强制置顶");
+                            if (NativeMethods.IsIconic(targetHwnd)) NativeMethods.ShowWindow(targetHwnd, NativeMethods.SW_RESTORE);
                             NativeMethods.SetForegroundWindow(targetHwnd);
-                            NativeMethods.SetWindowPos(targetHwnd, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0,
-                                NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE);
-                        }
-                        else
-                        {
-                            Log("警告", $"未找到脚本窗口 [{task.MacroWindowTitle}]，宏操作可能失效。");
+                            NativeMethods.SetWindowPos(targetHwnd, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0, NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE);
                         }
                     }
 
                     foreach (var action in task.Actions)
                     {
                         if (_stopRequested) break;
-
                         if (action.DelayBefore > 0) await Task.Delay(action.DelayBefore);
 
-                        // 转换坐标：如果提供了目标窗口，将客户区坐标转为屏幕坐标
-                        int screenX = action.X, screenY = action.Y;
-                        if (targetHwnd != IntPtr.Zero)
-                        {
-                            var pt = new System.Drawing.Point(action.X, action.Y);
-                            NativeMethods.ClientToScreen(targetHwnd, ref pt);
-                            screenX = pt.X;
-                            screenY = pt.Y;
-                        }
-
-                        // 执行动作时使用屏幕坐标
-                        switch (action.ActionType)
-                        {
-
-                            case MacroActionType.MouseMove:
-                                NativeMethods.SetCursorPos(screenX, screenY);
-                                break;
-                            case MacroActionType.MouseLeftUp:
-                                NativeMethods.SetCursorPos(screenX, screenY);
-                                NativeMethods.mouse_event(NativeMethods.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
-                                break;
-                            case MacroActionType.MouseRightUp:
-                                NativeMethods.SetCursorPos(screenX, screenY);
-                                NativeMethods.mouse_event(NativeMethods.MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0);
-                                break;
-                            default:
-                                InputSimulator.ExecuteAction(action);
-                                break;
-                            case MacroActionType.MouseLeftDown:
-                                NativeMethods.SetCursorPos(screenX, screenY);
-                                NativeMethods.mouse_event(NativeMethods.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
-                                await Task.Delay(50);
-                                NativeMethods.mouse_event(NativeMethods.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
-                                break;
-                            case MacroActionType.MouseRightDown:
-                                NativeMethods.SetCursorPos(screenX, screenY);
-                                NativeMethods.mouse_event(NativeMethods.MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0);
-                                await Task.Delay(50);
-                                NativeMethods.mouse_event(NativeMethods.MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0);
-                                break;
-                        }
+                        if (targetHwnd != IntPtr.Zero) NativeMethods.SetForegroundWindow(targetHwnd); // 点击前强校验
+                        InputSimulator.ExecuteAction(action);
                     }
 
                     if (targetHwnd != IntPtr.Zero)
                     {
-                        Log("系统", "已恢复脚本窗口正常层级");
-                        NativeMethods.SetWindowPos(targetHwnd, NativeMethods.HWND_NOTOPMOST, 0, 0, 0, 0,
-                            NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE);
+                        Log("系统", "防遮挡：已恢复正常层级");
+                        NativeMethods.SetWindowPos(targetHwnd, NativeMethods.HWND_NOTOPMOST, 0, 0, 0, 0, NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE);
                     }
-
                     Log("操作", "宏操作执行完毕！");
                 }
-                #endregion
 
+                // 4. 进程存活监控循环
                 task.Status = "运行中";
                 Log("任务", $"开始监控运行，时长: {task.RunTime} 分钟");
-                await SendBark(task.Name, "运行中");
-
                 DateTime endTime = DateTime.Now.AddMinutes(task.RunTime);
                 int missingCounter = 0;
-                bool hasTakenScreenshot = false;
 
-                #region 主监控循环
                 while (DateTime.Now < endTime && !_stopRequested)
                 {
-                    #region 进程存活检测（固定5秒）
-                    var aliveProcesses = GetAliveProcesses(task);
-                    bool currentlyAlive = aliveProcesses.Count > 0;
-
-                    if (currentlyAlive != lastAliveState)
+                    // 仅当配置了进程名时才去监控死活，否则纯挂机
+                    if (!string.IsNullOrWhiteSpace(task.ProcessNames) || !string.IsNullOrWhiteSpace(task.ExtraProcessNames))
                     {
-                        Log("监控", currentlyAlive ? $"目标进程恢复，PID: {string.Join(", ", aliveProcesses.Select(p => p.Id))}" : "目标进程丢失（连续5秒结束任务）");
-                        lastAliveState = currentlyAlive;
-                    }
+                        var aliveProcesses = GetAliveProcesses(task);
+                        bool currentlyAlive = aliveProcesses.Count > 0;
 
-                    if (!currentlyAlive)
-                    {
-                        missingCounter++;
-                        if (missingCounter >= 5)
+                        if (currentlyAlive != lastAliveState)
                         {
-                            Log("监控", $"{task.Name} 主进程连续丢失5秒，任务结束");
-
-                            KillRelatedProcesses(task, mainProcess);
-                            task.Status = "已完成";
-                            await SendBark(task.Name, "运行结束（进程丢失5秒）");
-                            return;
+                            Log("监控", currentlyAlive ? $"目标进程恢复" : "目标进程丢失（连续5秒结束任务）");
+                            lastAliveState = currentlyAlive;
                         }
-                    }
-                    else
-                    {
-                        missingCounter = 0;
-                    }
-                    #endregion
 
-                    if (!hasTakenScreenshot && (endTime - DateTime.Now).TotalSeconds <= 60)
-                    {
-                        Log("任务", "任务进入最后一分钟，执行自动截图...");
-                        TakeScreenshot(task);
-                        hasTakenScreenshot = true;
+                        if (!currentlyAlive)
+                        {
+                            missingCounter++;
+                            if (missingCounter >= 5)
+                            {
+                                Log("监控", $"{task.Name} 进程彻底丢失，结束当前任务");
+                                break;
+                            }
+                        }
+                        else missingCounter = 0;
                     }
-
                     await Task.Delay(1000);
                 }
-                #endregion
 
-                #region 结束处理
-                if (_stopRequested)
-                {
-                    task.Status = "手动停止";
-                    KillRelatedProcesses(task, mainProcess);
-                    await SendBark(task.Name, "手动停止");
-                }
-                else
-                {
-                    if (!hasTakenScreenshot)
-                    {
-                        Log("任务", "任务即将结束，执行最终截图...");
-                        TakeScreenshot(task);
-                    }
-
-                    task.Status = "已完成";
-
-                    KillRelatedProcesses(task, mainProcess);
-                    await SendBark(task.Name, "运行结束（正常）");
-                }
-                #endregion
-            }
-            finally
-            {
+                // 5. 结束收尾
+                task.Status = _stopRequested ? "手动停止" : "已完成";
                 KillRelatedProcesses(task, mainProcess);
+                await SendBark(task.Name, task.Status);
             }
+            finally { KillRelatedProcesses(task, mainProcess); }
+        }
+
+        // 辅助检测窗口稳定的方法
+        private async Task<bool> WaitForWindow(string title, int timeoutSeconds)
+        {
+            int consecutiveCount = 0;
+            for (int i = 0; i < timeoutSeconds; i++)
+            {
+                if (_stopRequested) return false;
+                IntPtr hwnd = NativeMethods.FindWindow(null, title);
+                if (hwnd != IntPtr.Zero && NativeMethods.IsWindowVisible(hwnd))
+                {
+                    consecutiveCount++;
+                    if (consecutiveCount >= 2) return true; // 连续2秒找到视为稳定
+                }
+                else consecutiveCount = 0;
+                await Task.Delay(1000);
+            }
+            return false;
         }
         #endregion
 
@@ -427,8 +352,14 @@ namespace TaskSchedulerApp.Services
         private List<Process> GetAliveProcesses(TaskItem task)
         {
             var list = new List<Process>();
-            var names = task.ProcessNames.Split(',', StringSplitOptions.RemoveEmptyEntries);
-            foreach (var name in names)
+            var allNames = new List<string>();
+
+            if (!string.IsNullOrWhiteSpace(task.ProcessNames))
+                allNames.AddRange(task.ProcessNames.Split(',', StringSplitOptions.RemoveEmptyEntries));
+            if (!string.IsNullOrWhiteSpace(task.ExtraProcessNames))
+                allNames.AddRange(task.ExtraProcessNames.Split(',', StringSplitOptions.RemoveEmptyEntries));
+
+            foreach (var name in allNames)
             {
                 string clean = name.Trim().Replace(".exe", "", StringComparison.OrdinalIgnoreCase);
                 if (string.IsNullOrEmpty(clean)) continue;

@@ -3,12 +3,10 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Windows;
-using System.Windows.Controls;
 using System.Windows.Input;
-using System.Windows.Interop;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using System.Windows.Media.Imaging;
+using System.Windows.Interop;
 using TaskSchedulerApp.Core;
 using TaskSchedulerApp.Models;
 using TaskSchedulerApp.Services;
@@ -24,7 +22,10 @@ namespace TaskSchedulerApp
         private DispatcherTimer _hotkeyTimer;
         private MiniLogWindow? _miniLogWindow;
         private DateTime _lastHotkeyTime = DateTime.MinValue;
-        private MacroRecorder? _recorder;
+        private bool _isContinuousRecording = false;
+        private DateTime _lastClickTime = DateTime.Now;
+        private bool _wasF9Pressed = false;
+        private bool _wasLeftMouseDown = false;
 
         public MainWindow()
         {
@@ -60,20 +61,21 @@ namespace TaskSchedulerApp
         {
 
         }
-        private void ActionsDataGrid_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
-        {
-            if (e.Key == Key.Delete && _viewModel.SelectedTask?.Actions != null)
-            {
-                if ((sender as DataGrid)?.SelectedItem is MacroAction selectedAction)
-                {
-                    _viewModel.SelectedTask.Actions.Remove(selectedAction);
-                    e.Handled = true;
-                }
-            }
-        }
+
         public void HideWindow()
         {
             this.Hide();
+
+            try
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                if (Environment.OSVersion.Platform == PlatformID.Win32NT)
+                {
+                    NativeMethods.SetProcessWorkingSetSize(Process.GetCurrentProcess().Handle, -1, -1);
+                }
+            }
+            catch { }
 
             if (_miniLogWindow != null)
             {
@@ -114,8 +116,6 @@ namespace TaskSchedulerApp
         private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
         {
             if (_viewModel.IsRunning) { e.Cancel = true; HideWindow(); return; }
-            // 停止录制并保存
-            StopRecording();
             _viewModel.SaveConfigCommand.Execute(null);
             if (_notifyIcon != null) { _notifyIcon.Visible = false; _notifyIcon.Dispose(); }
             if (_miniLogWindow != null) _miniLogWindow.Close();
@@ -169,127 +169,46 @@ namespace TaskSchedulerApp
 
         private void HotkeyTimer_Tick(object? sender, EventArgs e)
         {
-            if (!this.IsActive) return;
-            if ((DateTime.Now - _lastHotkeyTime).TotalMilliseconds < 500) return;
-            if (_viewModel.SelectedTask == null) return;
+            if (!this.IsActive && !_isContinuousRecording) return;
 
-            // F9 - 录制左键
-            if (NativeMethods.GetAsyncKeyState(0x78) != 0)
+            bool isCtrlPressed = (NativeMethods.GetAsyncKeyState(0x11) & 0x8000) != 0;
+            bool isF9Pressed = (NativeMethods.GetAsyncKeyState(0x78) & 0x8000) != 0;
+            bool isLeftMouseDown = (NativeMethods.GetAsyncKeyState(0x01) & 0x8000) != 0;
+
+            // 1. 处理 Ctrl+F9 开关连点录制
+            if (isCtrlPressed && isF9Pressed && !_wasF9Pressed && _viewModel.SelectedTask != null)
             {
-                _lastHotkeyTime = DateTime.Now;
-                RecordClick("Left");
+                _isContinuousRecording = !_isContinuousRecording;
+                _lastClickTime = DateTime.Now;
+                _viewModel.Log("操作", _isContinuousRecording ? "🔴 已开启连续录制，尽情点击吧！" : "⏹ 连续录制结束！");
+                if (!_isContinuousRecording) _viewModel.SaveConfigCommand.Execute(null);
             }
-            // Shift+F9 录制右键
-            else if (NativeMethods.GetAsyncKeyState(0x78) != 0 && (NativeMethods.GetAsyncKeyState(0x10) & 0x8000) != 0)
+            // 2. 处理单点 F9 录制
+            else if (!isCtrlPressed && isF9Pressed && !_wasF9Pressed && _viewModel.SelectedTask != null)
             {
-                _lastHotkeyTime = DateTime.Now;
-                RecordClick("Right");
-            }
-            // F8 - 智能填入窗口标题
-            else if (NativeMethods.GetAsyncKeyState(0x77) != 0)
-            {
-                _lastHotkeyTime = DateTime.Now;
-                SmartFillWindowTitle();
-            }
-        }
-
-        /// <summary>
-        /// 根据鼠标当前悬停的 TextBox 智能填入窗口标题
-        /// </summary>
-        private void SmartFillWindowTitle()
-        {
-            var task = _viewModel.SelectedTask;
-            if (task == null) return;
-
-            // 获取当前键盘焦点所在元素
-            var focusedElement = FocusManager.GetFocusedElement(this) as FrameworkElement;
-            if (focusedElement == null) return;
-
-            // 判断焦点是否在游戏标题框或脚本标题框
-            bool isGameTitle = focusedElement.Name == "GameTitleBox";
-            bool isMacroTitle = focusedElement.Name == "MacroTitleBox";
-
-            if (!isGameTitle && !isMacroTitle)
-            {
-                _viewModel.Log("提示", "请先点击「游戏窗口标题」或「脚本窗口标题」输入框，再将鼠标移动到目标窗口上按 F8。");
-                return;
-            }
-
-            // 抓取鼠标屏幕位置所在窗口标题
-            var screenPoint = WinForms.Cursor.Position;
-            string title = NativeMethods.GetWindowTitleFromPoint(screenPoint.X, screenPoint.Y);
-            if (string.IsNullOrWhiteSpace(title))
-            {
-                _viewModel.Log("警告", "F8：该位置未找到窗口标题。");
-                return;
-            }
-
-            // 填入对应字段
-            if (isGameTitle)
-                task.WindowTitle = title;
-            else
-                task.MacroWindowTitle = title;
-
-            _viewModel.Log("操作", $"F8 抓取{(isGameTitle ? "游戏" : "脚本")}窗口标题: [{title}]");
-        }
-
-        /// <summary>
-        /// 在父链中查找指定名称的控件
-        /// </summary>
-        private FrameworkElement? FindParentByName(DependencyObject child, string name)
-        {
-            while (child != null)
-            {
-                if (child is FrameworkElement fe && fe.Name == name)
-                    return fe;
-                child = VisualTreeHelper.GetParent(child);
-            }
-            return null;
-        }
-        private void RecordClick(string button)
-        {
-            var task = _viewModel.SelectedTask;
-            if (task == null) return;
-
-            try
-            {
-                // 确保录制器已启动
-                if (_recorder == null || _recorder.Status != RecordStatus.Recording)
-                {
-                    _recorder = new MacroRecorder(task);
-                    _recorder.Start();
-                    _viewModel.IsRecording = true;
-                    _viewModel.Log("录制", "开始录制宏，请按 F9 (左键) 或 Shift+F9 (右键) 在脚本窗口上点击。");
-                }
-
-                var screenPoint = WinForms.Cursor.Position;
-                bool success = _recorder.RecordClick(button, screenPoint);
-                if (success)
-                {
-                    _viewModel.Log("操作", $"{button}键点击已录制，客户区坐标已保存。");
-                }
-                else
-                {
-                    _viewModel.Log("警告", "录制失败：鼠标不在目标脚本窗口上，或脚本窗口未匹配。");
-                }
-            }
-            catch (Exception ex)
-            {
-                _viewModel.Log("错误", $"录制异常：{ex.Message}");
-            }
-        }
-
-        public void StopRecording()
-        {
-            if (_recorder != null && _recorder.Status == RecordStatus.Recording)
-            {
-                _recorder.Stop();
-                _viewModel.IsRecording = false;
-                _viewModel.Log("录制", "停止录制。");
-                // 停止录制时自动保存一次配置
+                var pt = WinForms.Cursor.Position;
+                _viewModel.SelectedTask.Actions.Add(new MacroAction { ActionType = MacroActionType.MouseLeftClick, X = pt.X, Y = pt.Y, DelayBefore = 1000, Description = "F9单击录制" });
+                _viewModel.Log("操作", $"录制单击 X:{pt.X}, Y:{pt.Y}");
                 _viewModel.SaveConfigCommand.Execute(null);
             }
-            _recorder = null;
+            _wasF9Pressed = isF9Pressed;
+
+            // 3. 处理连续录制时的左键点击捕获
+            if (_isContinuousRecording && _viewModel.SelectedTask != null)
+            {
+                if (isLeftMouseDown && !_wasLeftMouseDown) // 鼠标刚刚按下
+                {
+                    int delay = (int)(DateTime.Now - _lastClickTime).TotalMilliseconds;
+                    if (delay > 5000) delay = 1000; // 防呆
+                    if (delay < 50) delay = 50;
+
+                    var pt = WinForms.Cursor.Position;
+                    _viewModel.SelectedTask.Actions.Add(new MacroAction { ActionType = MacroActionType.MouseLeftClick, X = pt.X, Y = pt.Y, DelayBefore = delay, Description = "连续录制" });
+                    _viewModel.Log("操作", $"捕获点击 X:{pt.X}, Y:{pt.Y}");
+                    _lastClickTime = DateTime.Now;
+                }
+                _wasLeftMouseDown = isLeftMouseDown;
+            }
         }
 
         private void CleanOldScreenshots()
@@ -304,7 +223,6 @@ namespace TaskSchedulerApp
         private AppSettings _settings;
         private TaskItem? _selectedTask;
         private bool _isRunning;
-        private bool _isRecording;
         private AutomationService? _runner;
         private readonly object _logLock = new object();
 
@@ -314,7 +232,6 @@ namespace TaskSchedulerApp
         public bool IsRunning { get => _isRunning; set { _isRunning = value; OnPropertyChanged(); OnPropertyChanged(nameof(IsNotRunning)); } }
         public bool IsNotRunning => !IsRunning;
         public bool IsTaskSelected => SelectedTask != null;
-        public bool IsRecording { get => _isRecording; set { _isRecording = value; OnPropertyChanged(); } }
 
         public ICommand SaveConfigCommand { get; }
         public ICommand OpenSettingsCommand { get; }
@@ -329,7 +246,7 @@ namespace TaskSchedulerApp
         public ICommand TestClickCommand { get; }
         public ICommand ShowImageLogCommand { get; }
         public ICommand OpenAboutCommand { get; }
-        public ICommand StopRecordingCommand { get; }
+        public ICommand ClearMacrosCommand { get; }
 
         public MainViewModel(MainWindow view)
         {
@@ -351,18 +268,47 @@ namespace TaskSchedulerApp
 
             StartTaskCommand = new RelayCommand(StartTasks);
             StopTaskCommand = new RelayCommand(() => { try { _runner?.RequestStop(); } catch (Exception ex) { Log("错误", ex.Message); } });
-            TestClickCommand = new RelayCommand(async () => {
-                if (SelectedTask != null && SelectedTask.Actions != null)
+            ShowImageLogCommand = new RelayCommand(() => new ImageLogWindow(Settings.ScreenshotPath).Show());
+            ClearMacrosCommand = new RelayCommand(() => {
+                if (SelectedTask != null)
                 {
-                    Log("测试", "开始回放测试...");
-                    // 这里调用自动化服务的单任务测试，可直接使用临时服务或模拟
-                    var testService = new AutomationService(Settings, Log);
-                    await testService.RunSingleTask(SelectedTask);
-                    Log("测试", "回放测试结束。");
+                    SelectedTask.Actions.Clear();
+                    SaveConfigCommand.Execute(null);
+                    Log("操作", "已清空宏动作列表");
                 }
             });
-            ShowImageLogCommand = new RelayCommand(() => new ImageLogWindow(Settings.ScreenshotPath).Show());
-            StopRecordingCommand = new RelayCommand(() => _view.StopRecording());
+
+            // 替换测试点击的绑定 (加入防遮挡和遍历)
+            TestClickCommand = new RelayCommand(async () => {
+                if (SelectedTask != null && SelectedTask.Actions != null && SelectedTask.Actions.Count > 0)
+                {
+                    Log("测试", "准备回放，防遮挡检测中...");
+                    bool foundScript = false;
+                    if (!string.IsNullOrWhiteSpace(SelectedTask.ScriptWindowTitle))
+                    {
+                        IntPtr hwnd = NativeMethods.FindWindow(null, SelectedTask.ScriptWindowTitle);
+                        if (hwnd != IntPtr.Zero)
+                        {
+                            NativeMethods.ShowWindow(hwnd, NativeMethods.SW_RESTORE);
+                            NativeMethods.SetForegroundWindow(hwnd);
+                            foundScript = true;
+                        }
+                    }
+
+                    if (!foundScript) Application.Current.Dispatcher.Invoke(() => _view.WindowState = WindowState.Minimized);
+                    await Task.Delay(500);
+
+                    foreach (var action in SelectedTask.Actions)
+                    {
+                        if (action.DelayBefore > 0) await Task.Delay(action.DelayBefore);
+                        InputSimulator.ExecuteAction(action);
+                    }
+
+                    Log("测试", "回放测试结束");
+                    Application.Current.Dispatcher.Invoke(() => { _view.WindowState = WindowState.Normal; _view.Activate(); });
+                }
+            });
+
         }
 
         private void LoadConfig()
@@ -403,6 +349,8 @@ namespace TaskSchedulerApp
             var dlg = new Microsoft.Win32.OpenFileDialog { Filter = "Executables|*.exe;*.bat;*.cmd|All Files|*.*" };
             if (dlg.ShowDialog() == true) SelectedTask.ExtraStartPath = dlg.FileName;
         }
+
+        
 
         public async void StartTasks()
         {

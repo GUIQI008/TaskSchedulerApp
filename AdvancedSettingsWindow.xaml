@@ -1,52 +1,95 @@
-﻿<hc:Window x:Class="TaskSchedulerApp.AdvancedSettingsWindow"
-           xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-           xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-           xmlns:hc="https://handyorg.github.io/handycontrol"
-           Title="高级设置" Height="500" Width="500" 
-           ResizeMode="NoResize" WindowStartupLocation="CenterScreen">
-    <StackPanel Margin="20">
-        <GroupBox Header="Bark 推送设置">
-            <StackPanel>
-                <hc:TextBox hc:InfoElement.Title="Server URL" Text="{Binding BarkUrl}" Style="{StaticResource TextBoxExtend}" Margin="0,5"/>
-                <hc:TextBox hc:InfoElement.Title="Icon URL" Text="{Binding BarkIcon}" Style="{StaticResource TextBoxExtend}" Margin="0,5"/>
-                <Button Content="测试推送" Click="TestPush_Click" HorizontalAlignment="Right" Margin="0,10,0,0"/>
-            </StackPanel>
-        </GroupBox>
+﻿<Window x:Class="TaskSchedulerApp.AdvancedSettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:hc="https://handyorg.github.io/handycontrol"
+        Title="高级设置" Height="560" Width="500" 
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        ResizeMode="NoResize" WindowStartupLocation="CenterScreen">
 
-        <GroupBox Header="系统设置" Margin="0,10,0,0">
-            <StackPanel>
+    <!-- 外层阴影与圆角边框 -->
+    <Border Background="{DynamicResource RegionBrush}" 
+            CornerRadius="12" Margin="15"
+            Effect="{StaticResource EffectShadow2}">
 
-                <TextBlock Text="截图保存路径" Margin="0,5,0,2" Foreground="{DynamicResource PrimaryTextBrush}"/>
-                <Grid Margin="0,0,0,5">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <hc:TextBox Text="{Binding ScreenshotPath}" Style="{StaticResource TextBoxExtend}"/>
-                    <Button Grid.Column="1" Content="📂" Click="SelectScreenshotFolder_Click" Margin="5,0,0,0" Width="40"/>
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="50"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <!-- 自定义标题栏 (支持拖拽) -->
+            <Border Grid.Row="0" Background="{DynamicResource SecondaryRegionBrush}" 
+                    CornerRadius="12,12,0,0" MouseLeftButtonDown="DragWindow_MouseDown">
+                <Grid>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="15,0,0,0">
+                        <TextBlock Text="⚙" FontSize="16" Foreground="{DynamicResource PrimaryBrush}" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                        <TextBlock Text="高级设置" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" VerticalAlignment="Center"/>
+                    </StackPanel>
+
+                    <Button Click="SaveAndClose_Click" HorizontalAlignment="Right" Margin="0,0,10,0"
+                            Style="{StaticResource ButtonIcon}" hc:IconElement.Geometry="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z" 
+                            Foreground="{DynamicResource DangerBrush}" Width="35" Height="35" Background="Transparent" BorderThickness="0"/>
                 </Grid>
+            </Border>
 
-                <TextBlock Text="运行日志保存路径" Margin="0,5,0,2" Foreground="{DynamicResource PrimaryTextBrush}"/>
-                <Grid Margin="0,0,0,5">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <hc:TextBox Text="{Binding LogPath}" Style="{StaticResource TextBoxExtend}"/>
-                    <Button Grid.Column="1" Content="📂" Click="SelectLogFolder_Click" Margin="5,0,0,0" Width="40"/>
-                </Grid>
+            <!-- 核心内容区 -->
+            <StackPanel Grid.Row="1" Margin="25,20,25,20">
 
-                <StackPanel Orientation="Horizontal" Margin="0,10">
-                    <TextBlock Text="完成后操作：" VerticalAlignment="Center" Width="100"/>
-                    <ComboBox SelectedValue="{Binding OnCompletionAction}" SelectedValuePath="Content" Width="200">
-                        <ComboBoxItem Content="No Action"/>
-                        <ComboBoxItem Content="Shutdown"/>
-                        <ComboBoxItem Content="Sleep"/>
-                    </ComboBox>
-                </StackPanel>
+                <!-- Bark 推送设置卡片 -->
+                <TextBlock Text="推送设置 (Bark)" FontWeight="Bold" FontSize="13" Foreground="{DynamicResource PrimaryTextBrush}" Margin="5,0,0,8"/>
+                <Border Background="{DynamicResource SecondaryRegionBrush}" CornerRadius="8" Padding="15">
+                    <StackPanel>
+                        <hc:TextBox hc:InfoElement.Title="Server URL" hc:InfoElement.Placeholder="https://api.day.app/你的Key/" 
+                                    Text="{Binding BarkUrl}" Style="{StaticResource TextBoxExtend}" Margin="0,0,0,12"/>
+                        <hc:TextBox hc:InfoElement.Title="Icon URL" hc:InfoElement.Placeholder="通知显示的图标链接 (可选)"
+                                    Text="{Binding BarkIcon}" Style="{StaticResource TextBoxExtend}" Margin="0,0,0,12"/>
+                        <Button Content="测试推送" Click="TestPush_Click" Style="{StaticResource ButtonPrimary}" HorizontalAlignment="Right" Width="90"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- 系统设置卡片 -->
+                <TextBlock Text="文件与行为" FontWeight="Bold" FontSize="13" Foreground="{DynamicResource PrimaryTextBrush}" Margin="5,20,0,8"/>
+                <Border Background="{DynamicResource SecondaryRegionBrush}" CornerRadius="8" Padding="15">
+                    <StackPanel>
+                        <!-- 截图路径 -->
+                        <Grid Margin="0,0,0,12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <hc:TextBox hc:InfoElement.Title="截图保存路径" Text="{Binding ScreenshotPath}" Style="{StaticResource TextBoxExtend}" IsReadOnly="True"/>
+                            <Button Grid.Column="1" Content="浏览" Click="SelectScreenshotFolder_Click" Style="{StaticResource ButtonDefault}" Margin="10,0,0,0" Width="60" VerticalAlignment="Bottom"/>
+                        </Grid>
+
+                        <!-- 日志路径 -->
+                        <Grid Margin="0,0,0,15">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <hc:TextBox hc:InfoElement.Title="运行日志保存路径" Text="{Binding LogPath}" Style="{StaticResource TextBoxExtend}" IsReadOnly="True"/>
+                            <Button Grid.Column="1" Content="浏览" Click="SelectLogFolder_Click" Style="{StaticResource ButtonDefault}" Margin="10,0,0,0" Width="60" VerticalAlignment="Bottom"/>
+                        </Grid>
+
+                        <!-- 完成操作 -->
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="所有任务完成后：" VerticalAlignment="Center" Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,15,0"/>
+                            <ComboBox Grid.Column="1" SelectedValue="{Binding OnCompletionAction}" SelectedValuePath="Content">
+                                <ComboBoxItem Content="No Action" />
+                                <ComboBoxItem Content="Shutdown" />
+                                <ComboBoxItem Content="Sleep" />
+                            </ComboBox>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- 底部保存按钮 -->
+                <Button Content="保存并关闭" Click="SaveAndClose_Click" Style="{StaticResource ButtonPrimary}" Height="35" Margin="0,25,0,0"/>
             </StackPanel>
-        </GroupBox>
-
-        <Button Content="保存并关闭" Click="SaveAndClose_Click" Style="{StaticResource ButtonPrimary}" HorizontalAlignment="Right" Margin="0,20,0,0"/>
-    </StackPanel>
-</hc:Window>
+        </Grid>
+    </Border>
+</Window>

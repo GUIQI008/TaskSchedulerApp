@@ -1,10 +1,14 @@
-﻿using System.Net.Http;
+﻿using System;
+using System.Net.Http;
+using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Input;
 using TaskSchedulerApp.Models;
 
 namespace TaskSchedulerApp
 {
-    public partial class AdvancedSettingsWindow : HandyControl.Controls.Window
+    // 【注意修改点1】：这里不再继承 HandyControl.Controls.Window，而是继承原生 Window
+    public partial class AdvancedSettingsWindow : Window
     {
         private AppSettings _settings;
 
@@ -13,6 +17,15 @@ namespace TaskSchedulerApp
             InitializeComponent();
             _settings = settings;
             DataContext = _settings;
+        }
+
+        // 【注意修改点2】：新增拖拽窗口的方法
+        private void DragWindow_MouseDown(object sender, MouseButtonEventArgs e)
+        {
+            if (e.ChangedButton == MouseButton.Left)
+            {
+                this.DragMove();
+            }
         }
 
         private async void TestPush_Click(object sender, RoutedEventArgs e)
@@ -26,19 +39,20 @@ namespace TaskSchedulerApp
             {
                 try
                 {
-                    // 静态调用，避免实例化 AutomationService
                     using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
                     string barkUrl = _settings.BarkUrl.TrimEnd('/');
                     string url = $"{barkUrl}/{Uri.EscapeDataString("测试推送")}/{Uri.EscapeDataString("配置正确！")}";
                     if (!string.IsNullOrWhiteSpace(_settings.BarkIcon))
                         url += $"?icon={Uri.EscapeDataString(_settings.BarkIcon)}";
+
                     var response = await client.GetAsync(url);
                     response.EnsureSuccessStatusCode();
+
                     Dispatcher.Invoke(() => HandyControl.Controls.MessageBox.Success("Ciallo⁓\n 推送成功！✅"));
                 }
                 catch
                 {
-                    Dispatcher.Invoke(() => HandyControl.Controls.MessageBox.Error("推送失败"));
+                    Dispatcher.Invoke(() => HandyControl.Controls.MessageBox.Error("推送失败，请检查 URL 或网络"));
                 }
             });
         }
