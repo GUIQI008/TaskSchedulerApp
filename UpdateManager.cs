@@ -10,7 +10,7 @@ using MessageBox = HandyControl.Controls.MessageBox;
 
 public class UpdateManager
 {
-    public const string CurrentVersion = "2.3.4";
+    public const string CurrentVersion = "2.3.5";
 
     // 【必改】替换为你的 GitHub 用户名和仓库名
     private const string RepoOwner = "GUIQI008";

@@ -232,78 +232,125 @@ namespace TaskSchedulerApp.Services
                     Log("操作", "宏操作执行完毕！");
                 }
 
-                // 4. 进程存活监控循环（精确绑定本次脚本主进程）
+                // 4. 双模监控：窗口优先，进程名兜底
                 task.Status = "运行中";
                 Log("任务", $"开始监控运行，时长: {task.RunTime} 分钟");
                 DateTime endTime = DateTime.Now.AddMinutes(task.RunTime);
 
-                bool scriptExited = false;          // 主脚本是否已退出
-                bool hasDetectedOnce = false;       // 是否曾确认主进程存活
-                int missingCounter = 0;
                 bool hasTakenScreenshot = false;
 
-                while (DateTime.Now < endTime && !_stopRequested)
+                if (!string.IsNullOrWhiteSpace(task.ScriptWindowTitle))
                 {
-                    // --- 关键改动：监控主进程对象，而不是所有同名进程 ---
-                    if (mainProcess != null)
+                    // =================== 模式一：窗口监控 ===================
+                    int missingCounter = 0;
+                    string title = task.ScriptWindowTitle;
+
+                    // 启动后立即检查窗口是否存在
+                    IntPtr testHwnd = NativeMethods.FindWindow(null, title);
+                    if (testHwnd == IntPtr.Zero)
                     {
-                        // 刷新进程最新状态
-                        try { mainProcess.Refresh(); }
-                        catch
-                        {
-                            // 如果刷新出错，大概率进程已退出
-                            scriptExited = true;
-                        }
+                        Log("错误", $"未检测到脚本窗口 [{title}]，任务中止");
+                        task.Status = "启动失败";
+                        return;
+                    }
+                    Log("监控", "脚本窗口已确认存在，开始窗口存活监控");
 
-                        if (!scriptExited && mainProcess.HasExited)
-                            scriptExited = true;
-
-                        if (!scriptExited)
+                    while (DateTime.Now < endTime && !_stopRequested)
+                    {
+                        IntPtr hwnd = NativeMethods.FindWindow(null, title);
+                        if (hwnd == IntPtr.Zero)
                         {
-                            hasDetectedOnce = true;
-                            missingCounter = 0;
+                            missingCounter++;
+                            if (missingCounter >= 5)
+                            {
+                                Log("监控", "脚本窗口关闭，任务结束");
+                                break;
+                            }
                         }
                         else
                         {
-                            // 只有曾经确认主进程存活过，才允许计入丢失
-                            if (hasDetectedOnce)
+                            missingCounter = 0;
+                        }
+
+                        // 最后60秒截图
+                        if (!hasTakenScreenshot && (endTime - DateTime.Now).TotalSeconds <= 60)
+                        {
+                            Log("任务", "任务进入最后一分钟，执行自动截图...");
+                            TakeScreenshot(task);
+                            hasTakenScreenshot = true;
+                        }
+
+                        await Task.Delay(1000);
+                    }
+                }
+                else
+                {
+                    // =================== 模式二：进程名监控 ===================
+                    bool hasDetectedOnce = false;
+                    int missingCounter = 0;
+                    int startupGraceSeconds = 10; // 给脚本和模拟器启动留出时间
+
+                    // 等待目标进程出现（防止启动慢导致误判）
+                    for (int i = 0; i < startupGraceSeconds; i++)
+                    {
+                        if (_stopRequested) break;
+                        var alive = GetAliveProcesses(task, null);
+                        if (alive.Count > 0)
+                        {
+                            hasDetectedOnce = true;
+                            Log("监控", "目标进程已出现，开始进程存活监控");
+                            break;
+                        }
+                        await Task.Delay(1000);
+                    }
+
+                    if (!hasDetectedOnce)
+                    {
+                        Log("错误", $"启动后 {startupGraceSeconds} 秒内未检测到任何目标进程，任务中止");
+                        task.Status = "启动失败";
+                        return;
+                    }
+
+                    while (DateTime.Now < endTime && !_stopRequested)
+                    {
+                        var alive = GetAliveProcesses(task, null);
+                        bool currentlyAlive = alive.Count > 0;
+
+                        if (!currentlyAlive)
+                        {
+                            missingCounter++;
+                            if (missingCounter >= 5)
                             {
-                                missingCounter++;
-                                if (missingCounter >= 5)
-                                {
-                                    Log("监控", "主脚本进程已退出，结束当前任务");
-                                    break;
-                                }
-                            }
-                            else
-                            {
-                                // 启动后从未检测到存活（比如启动失败），等待 10 秒后直接报错退出
-                                if ((DateTime.Now - (endTime - TimeSpan.FromMinutes(task.RunTime))).TotalSeconds > 10)
-                                {
-                                    Log("错误", "主脚本进程自启动后始终未被检测到，任务中止");
-                                    break;
-                                }
+                                Log("监控", "所有目标进程均已退出，任务结束");
+                                break;
                             }
                         }
-                    }
-                    else
-                    {
-                        // 如果没有拿到主进程对象（Process.Start 返回了 null），回退到按进程名兜底
-                        // 但这种情况极少发生，你可以在此处用原有的 GetAliveProcesses 作为备选
-                        Log("警告", "未获取到主进程句柄，启动后备监控");
-                        break; // 直接停止，避免死循环，你也可以选择保留旧的 GetAliveProcesses
-                    }
+                        else
+                        {
+                            missingCounter = 0;
+                        }
 
-                    // --- 自动截图逻辑保持不变 ---
-                    if (!hasTakenScreenshot && (endTime - DateTime.Now).TotalSeconds <= 60)
-                    {
-                        Log("任务", "任务进入最后一分钟，执行自动截图...");
-                        TakeScreenshot(task);
-                        hasTakenScreenshot = true;
-                    }
+                        if (!hasTakenScreenshot && (endTime - DateTime.Now).TotalSeconds <= 60)
+                        {
+                            Log("任务", "任务进入最后一分钟，执行自动截图...");
+                            TakeScreenshot(task);
+                            hasTakenScreenshot = true;
+                        }
 
-                    await Task.Delay(1000);
+                        await Task.Delay(1000);
+                    }
                 }
+
+                // 保底截图
+                if (!hasTakenScreenshot && !_stopRequested)
+                {
+                    Log("任务", "执行最终检查截图...");
+                    TakeScreenshot(task);
+                }
+
+                task.Status = _stopRequested ? "手动停止" : "已完成";
+                KillRelatedProcesses(task, null); 
+                await SendBark(task.Name, task.Status);
 
                 // 5. 结束收尾
                 // 【核心修复】：保底截图，防用户设定的时间太短或因进程丢失跳过截图
