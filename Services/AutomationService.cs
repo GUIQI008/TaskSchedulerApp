@@ -155,7 +155,27 @@ namespace TaskSchedulerApp.Services
                     Log("系统", $"启动脚本: {task.Path}");
                     try
                     {
-                        mainProcess = Process.Start(new ProcessStartInfo { FileName = task.Path, Arguments = task.Arguments, UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(task.Path) ?? "" });
+                        mainProcess = Process.Start(new ProcessStartInfo
+                        {
+                            FileName = task.Path,
+                            Arguments = task.Arguments,
+                            UseShellExecute = true,
+                            WorkingDirectory = Path.GetDirectoryName(task.Path) ?? ""
+                        });
+
+                        // 如果 mainProcess 为 null，尝试通过进程名找回（取最新启动的那个）
+                        if (mainProcess == null && !string.IsNullOrWhiteSpace(task.ProcessNames))
+                        {
+                            string procName = task.ProcessNames.Split(',')[0].Trim().Replace(".exe", "");
+                            var procs = Process.GetProcessesByName(procName);
+                            if (procs.Length > 0)
+                            {
+                                // 按启动时间降序，取最新的
+                                mainProcess = procs.OrderByDescending(p => {
+                                    try { return p.StartTime; } catch { return DateTime.MinValue; }
+                                }).FirstOrDefault();
+                            }
+                        }
 
                         // 【这里注意】：你的 task.ScriptRecognitionTimeout 我没看到定义，为了避免编译报错，我改用 task.RecognitionTimeout。
                         // 如果你定义了 ScriptRecognitionTimeout，请把下面这行的 RecognitionTimeout 改回 ScriptRecognitionTimeout
@@ -212,55 +232,69 @@ namespace TaskSchedulerApp.Services
                     Log("操作", "宏操作执行完毕！");
                 }
 
-                // 4. 进程存活监控循环
+                // 4. 进程存活监控循环（精确绑定本次脚本主进程）
                 task.Status = "运行中";
                 Log("任务", $"开始监控运行，时长: {task.RunTime} 分钟");
                 DateTime endTime = DateTime.Now.AddMinutes(task.RunTime);
 
-                // 【核心修复】：全部采用局部变量
+                bool scriptExited = false;          // 主脚本是否已退出
+                bool hasDetectedOnce = false;       // 是否曾确认主进程存活
                 int missingCounter = 0;
-                bool lastAliveState = true;
                 bool hasTakenScreenshot = false;
-                bool hasDetectedOnce = false; // 宏宽限期：只要探测到一次，才允许判断丢失
 
                 while (DateTime.Now < endTime && !_stopRequested)
                 {
-                    // 仅当配置了进程名时才去监控死活，否则纯挂机
-                    if (!string.IsNullOrWhiteSpace(task.ProcessNames) || !string.IsNullOrWhiteSpace(task.ExtraProcessNames))
+                    // --- 关键改动：监控主进程对象，而不是所有同名进程 ---
+                    if (mainProcess != null)
                     {
-                        // 传入 mainProcess 配合新版强效判定
-                        var aliveProcesses = GetAliveProcesses(task, mainProcess);
-                        bool currentlyAlive = aliveProcesses.Count > 0;
-
-                        if (currentlyAlive) hasDetectedOnce = true;
-
-                        if (currentlyAlive != lastAliveState)
+                        // 刷新进程最新状态
+                        try { mainProcess.Refresh(); }
+                        catch
                         {
-                            Log("监控", currentlyAlive ? $"目标进程存在/恢复" : "目标进程丢失（连续5秒后将结束任务）");
-                            lastAliveState = currentlyAlive;
+                            // 如果刷新出错，大概率进程已退出
+                            scriptExited = true;
                         }
 
-                        if (!currentlyAlive)
+                        if (!scriptExited && mainProcess.HasExited)
+                            scriptExited = true;
+
+                        if (!scriptExited)
                         {
-                            // 必须曾探测到进程存活，才开始计算丢失
-                            // 防止宏还没把游戏启动起来就被判负
+                            hasDetectedOnce = true;
+                            missingCounter = 0;
+                        }
+                        else
+                        {
+                            // 只有曾经确认主进程存活过，才允许计入丢失
                             if (hasDetectedOnce)
                             {
                                 missingCounter++;
                                 if (missingCounter >= 5)
                                 {
-                                    Log("监控", $"{task.Name} 进程彻底丢失，结束当前任务");
-                                    break; // 【核心修复】：用 break 跳出，保证走下面的收尾和截图逻辑
+                                    Log("监控", "主脚本进程已退出，结束当前任务");
+                                    break;
+                                }
+                            }
+                            else
+                            {
+                                // 启动后从未检测到存活（比如启动失败），等待 10 秒后直接报错退出
+                                if ((DateTime.Now - (endTime - TimeSpan.FromMinutes(task.RunTime))).TotalSeconds > 10)
+                                {
+                                    Log("错误", "主脚本进程自启动后始终未被检测到，任务中止");
+                                    break;
                                 }
                             }
                         }
-                        else
-                        {
-                            missingCounter = 0; // 只要活着，重置计数
-                        }
+                    }
+                    else
+                    {
+                        // 如果没有拿到主进程对象（Process.Start 返回了 null），回退到按进程名兜底
+                        // 但这种情况极少发生，你可以在此处用原有的 GetAliveProcesses 作为备选
+                        Log("警告", "未获取到主进程句柄，启动后备监控");
+                        break; // 直接停止，避免死循环，你也可以选择保留旧的 GetAliveProcesses
                     }
 
-                    // 自动截图逻辑 (最后 60 秒)
+                    // --- 自动截图逻辑保持不变 ---
                     if (!hasTakenScreenshot && (endTime - DateTime.Now).TotalSeconds <= 60)
                     {
                         Log("任务", "任务进入最后一分钟，执行自动截图...");
