@@ -177,8 +177,6 @@ namespace TaskSchedulerApp.Services
                             }
                         }
 
-                        // 【这里注意】：你的 task.ScriptRecognitionTimeout 我没看到定义，为了避免编译报错，我改用 task.RecognitionTimeout。
-                        // 如果你定义了 ScriptRecognitionTimeout，请把下面这行的 RecognitionTimeout 改回 ScriptRecognitionTimeout
                         if (!string.IsNullOrWhiteSpace(task.ScriptWindowTitle))
                         {
                             Log("任务", $"等待脚本窗口: [{task.ScriptWindowTitle}]");
@@ -205,7 +203,7 @@ namespace TaskSchedulerApp.Services
                     IntPtr targetHwnd = IntPtr.Zero;
                     if (!string.IsNullOrWhiteSpace(task.ScriptWindowTitle))
                     {
-                        targetHwnd = NativeMethods.FindWindow(null, task.ScriptWindowTitle);
+                        targetHwnd = NativeMethods.FindWindowFuzzy(task.ScriptWindowTitle);
                         if (targetHwnd != IntPtr.Zero)
                         {
                             Log("系统", "防遮挡：已将【脚本窗口】强制置顶");
@@ -246,7 +244,7 @@ namespace TaskSchedulerApp.Services
                     string title = task.ScriptWindowTitle;
 
                     // 启动后立即检查窗口是否存在
-                    IntPtr testHwnd = NativeMethods.FindWindow(null, title);
+                    IntPtr testHwnd = NativeMethods.FindWindowFuzzy(title);
                     if (testHwnd == IntPtr.Zero)
                     {
                         Log("错误", $"未检测到脚本窗口 [{title}]，任务中止");
@@ -257,7 +255,7 @@ namespace TaskSchedulerApp.Services
 
                     while (DateTime.Now < endTime && !_stopRequested)
                     {
-                        IntPtr hwnd = NativeMethods.FindWindow(null, title);
+                        IntPtr hwnd = NativeMethods.FindWindowFuzzy(title);
                         if (hwnd == IntPtr.Zero)
                         {
                             missingCounter++;
@@ -353,7 +351,6 @@ namespace TaskSchedulerApp.Services
                 await SendBark(task.Name, task.Status);
 
                 // 5. 结束收尾
-                // 【核心修复】：保底截图，防用户设定的时间太短或因进程丢失跳过截图
                 if (!hasTakenScreenshot && !_stopRequested)
                 {
                     Log("任务", "执行最终检查截图...");
@@ -377,7 +374,7 @@ namespace TaskSchedulerApp.Services
             for (int i = 0; i < timeoutSeconds; i++)
             {
                 if (_stopRequested) return false;
-                IntPtr hwnd = NativeMethods.FindWindow(null, title);
+                IntPtr hwnd = NativeMethods.FindWindowFuzzy(title);
                 if (hwnd != IntPtr.Zero && NativeMethods.IsWindowVisible(hwnd))
                 {
                     consecutiveCount++;
@@ -391,7 +388,6 @@ namespace TaskSchedulerApp.Services
         #endregion
 
         #region 辅助方法
-        // 【核心修复】：升级版 GetAliveProcesses，严厉打击僵尸进程！
         private List<Process> GetAliveProcesses(TaskItem task, Process? mainProcess)
         {
             var list = new List<Process>();
@@ -416,7 +412,6 @@ namespace TaskSchedulerApp.Services
                             // 【关键修复1】强制刷新进程对象，获取系统最底层的实时状态
                             p.Refresh();
 
-                            // 只有明确、没有报错地确认它没退出，才算活着
                             if (!p.HasExited)
                             {
                                 list.Add(p);
@@ -424,15 +419,13 @@ namespace TaskSchedulerApp.Services
                         }
                         catch
                         {
-                            // 【关键修复2】如果报任何错（如拒绝访问、进程已释放），说明它已经在走死亡流程了。
-                            // 绝对不能把它加到 list 里！直接无视它。
+
                         }
                     }
                 }
                 catch { }
             }
 
-            // 兜底：如果按名字没找到，但主进程对象还活着，也算作存活
             if (list.Count == 0 && mainProcess != null)
             {
                 try

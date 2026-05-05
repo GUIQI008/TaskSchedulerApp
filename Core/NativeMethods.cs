@@ -8,7 +8,7 @@ namespace TaskSchedulerApp.Core
 {
     public static class NativeMethods
     {
-        #region 窗口查找
+        #region 窗口查找与操作
         [DllImport("user32.dll", SetLastError = true)]
         public static extern IntPtr FindWindow(string? lpClassName, string? lpWindowName);
 
@@ -19,9 +19,7 @@ namespace TaskSchedulerApp.Core
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool SetForegroundWindow(IntPtr hWnd);
-        #endregion
 
-        #region 窗口操作
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
@@ -32,10 +30,51 @@ namespace TaskSchedulerApp.Core
         [DllImport("user32.dll")]
         public static extern bool IsIconic(IntPtr hWnd);
 
+        public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+        public static extern int GetWindowTextLength(IntPtr hWnd);
+
+        public static IntPtr FindWindowFuzzy(string partialTitle)
+        {
+            if (string.IsNullOrWhiteSpace(partialTitle)) return IntPtr.Zero;
+
+            IntPtr foundHwnd = IntPtr.Zero;
+
+            // 遍历系统中所有顶层窗口
+            EnumWindows((hWnd, lParam) =>
+            {
+                if (IsWindowVisible(hWnd)) // 仅扫描可见窗口
+                {
+                    int length = GetWindowTextLength(hWnd);
+                    if (length > 0)
+                    {
+                        StringBuilder sb = new StringBuilder(length + 1);
+                        GetWindowText(hWnd, sb, sb.Capacity);
+                        string title = sb.ToString();
+
+                        // 忽略大小写进行包含匹配
+                        if (title.IndexOf(partialTitle, StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            foundHwnd = hWnd;
+                            return false; // 找到了，停止遍历
+                        }
+                    }
+                }
+                return true; // 没找到，继续遍历下一个
+            }, IntPtr.Zero);
+
+            return foundHwnd;
+        }
+
         public static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
-        public static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
         public const uint SWP_NOSIZE = 0x0001;
         public const uint SWP_NOMOVE = 0x0002;
+        public static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
         public const uint SWP_SHOWWINDOW = 0x0040;
         public const int SW_RESTORE = 9;
         #endregion
