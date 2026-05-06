@@ -22,8 +22,6 @@ namespace TaskSchedulerApp.Services
         private static readonly HttpClient _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
         private readonly object _logLock = new object();
 
-        // 【已修复】：删除了全局的 lastAliveState，防止多个任务之间状态污染
-
         public bool IsStopRequested => _stopRequested;
 
         public AutomationService(AppSettings settings, Action<string, string> logAction)
@@ -104,11 +102,21 @@ namespace TaskSchedulerApp.Services
                 var task = executionQueue[i];
                 Log("系统", $">>> 执行任务 {i + 1}/{total}: {task.Name}");
 
-                await RunSingleTask(task);
+                try
+                {
+                    await RunSingleTask(task);
+                }
+                catch (Exception ex)
+                {
+                    Log("严重错误", $"任务 [{task.Name}] 发生系统级崩溃: {ex.Message}");
+                    task.Status = "运行崩溃";
+                    KillRelatedProcesses(task, null);
+                }
 
                 if (!_stopRequested && i < total - 1)
                 {
-                    Log("系统", "任务间隔：等待 5 秒...");
+                    Log("系统", "任务间隔：清理内存，等待 5 秒...");
+                    GC.Collect();
                     await Task.Delay(5000);
                 }
             }
@@ -131,25 +139,31 @@ namespace TaskSchedulerApp.Services
                 task.Status = "准备启动";
                 CleanOldScreenshots();
                 await SendBark(task.Name, "启动中...");
-
-                // 1. 先启动游戏(额外程序)并等待游戏窗口
+                // 1. 先启动游戏/模拟器
                 if (!string.IsNullOrWhiteSpace(task.ExtraStartPath) && File.Exists(task.ExtraStartPath))
                 {
-                    Log("系统", $"启动游戏: {task.ExtraStartPath}");
+                    Log("系统", $"启动游戏/模拟器: {task.ExtraStartPath}");
                     try
                     {
                         Process.Start(new ProcessStartInfo { FileName = task.ExtraStartPath, Arguments = task.ExtraStartArguments, UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(task.ExtraStartPath) ?? "" });
+
                         if (!string.IsNullOrWhiteSpace(task.WindowTitle))
                         {
-                            Log("任务", $"等待游戏窗口: [{task.WindowTitle}]");
+                            Log("任务", $"严格等待游戏/模拟器窗口: [{task.WindowTitle}]");
                             if (!await WaitForWindow(task.WindowTitle, task.RecognitionTimeout))
-                                Log("错误", "游戏窗口检测超时！(将继续往下执行)");
+                            {
+                                Log("错误", "游戏/模拟器加载超时！为防止脚本空跑点错，中止当前任务！");
+                                task.Status = "启动失败";
+                                return; // 直接退出
+                            }
+                            Log("任务", "游戏/模拟器窗口加载成功！等待额外 5 秒确保渲染完毕...");
+                            await Task.Delay(5000);
                         }
                     }
-                    catch (Exception ex) { Log("警告", $"游戏启动失败: {ex.Message}"); }
+                    catch (Exception ex) { Log("警告", $"游戏启动失败: {ex.Message}"); return; }
                 }
 
-                // 2. 后启动脚本(主程序)并等待脚本窗口
+                // 2. 后启动脚本 (主程序)
                 if (!string.IsNullOrWhiteSpace(task.Path) && File.Exists(task.Path))
                 {
                     Log("系统", $"启动脚本: {task.Path}");
@@ -163,39 +177,54 @@ namespace TaskSchedulerApp.Services
                             WorkingDirectory = Path.GetDirectoryName(task.Path) ?? ""
                         });
 
-                        // 如果 mainProcess 为 null，尝试通过进程名找回（取最新启动的那个）
                         if (mainProcess == null && !string.IsNullOrWhiteSpace(task.ProcessNames))
                         {
                             string procName = task.ProcessNames.Split(',')[0].Trim().Replace(".exe", "");
                             var procs = Process.GetProcessesByName(procName);
                             if (procs.Length > 0)
                             {
-                                // 按启动时间降序，取最新的
                                 mainProcess = procs.OrderByDescending(p => {
                                     try { return p.StartTime; } catch { return DateTime.MinValue; }
                                 }).FirstOrDefault();
-                            }
-                        }
-
-                        if (!string.IsNullOrWhiteSpace(task.ScriptWindowTitle))
-                        {
-                            Log("任务", $"等待脚本窗口: [{task.ScriptWindowTitle}]");
-                            if (!await WaitForWindow(task.ScriptWindowTitle, task.RecognitionTimeout))
-                            {
-                                Log("错误", "脚本窗口检测超时，任务中断");
-                                KillRelatedProcesses(task, mainProcess);
-                                task.Status = "启动失败";
-                                return;
                             }
                         }
                     }
                     catch (Exception ex) { Log("错误", $"脚本启动异常: {ex.Message}"); return; }
                 }
 
-                Log("任务", "程序加载完毕，等待 3 秒稳定...");
+                // 3. 核心时序控制：严格等待目标识别
+                bool isTargetReady = false;
+
+                if (!string.IsNullOrWhiteSpace(task.ScriptWindowTitle))
+                {
+                    Log("任务", $"严格等待脚本窗口加载: [{task.ScriptWindowTitle}]");
+                    isTargetReady = await WaitForWindow(task.ScriptWindowTitle, task.RecognitionTimeout);
+                }
+                else if (!string.IsNullOrWhiteSpace(task.ProcessNames) || mainProcess != null)
+                {
+                    Log("任务", "未配置窗口，严格等待脚本进程加载...");
+                    for (int i = 0; i < task.RecognitionTimeout; i++)
+                    {
+                        if (_stopRequested) return;
+                        var alive = GetAliveProcesses(task, mainProcess);
+                        if (alive.Count > 0) { isTargetReady = true; break; }
+                        await Task.Delay(1000);
+                    }
+                }
+                else { isTargetReady = true; }
+
+                if (!isTargetReady)
+                {
+                    Log("错误", $"在 {task.RecognitionTimeout} 秒内未识别到目标脚本，任务中止");
+                    task.Status = "启动失败";
+                    KillRelatedProcesses(task, mainProcess);
+                    return;
+                }
+
+                Log("任务", "目标识别成功，等待 3 秒程序稳定...");
                 await Task.Delay(3000);
 
-                // 3. 执行宏录制动作（包含防遮挡）
+                // 执行宏录制动作
                 if (task.Actions != null && task.Actions.Count > 0)
                 {
                     Log("操作", $"开始执行宏操作，共 {task.Actions.Count} 步...");
@@ -230,28 +259,19 @@ namespace TaskSchedulerApp.Services
                     Log("操作", "宏操作执行完毕！");
                 }
 
-                // 4. 双模监控：窗口优先，进程名兜底
+
+                // 任务监控阶段：双模监控
                 task.Status = "运行中";
                 Log("任务", $"开始监控运行，时长: {task.RunTime} 分钟");
                 DateTime endTime = DateTime.Now.AddMinutes(task.RunTime);
-
                 bool hasTakenScreenshot = false;
 
                 if (!string.IsNullOrWhiteSpace(task.ScriptWindowTitle))
                 {
-                    // =================== 模式一：窗口监控 ===================
+                    // --- 模式一：窗口监控 ---
                     int missingCounter = 0;
                     string title = task.ScriptWindowTitle;
-
-                    // 启动后立即检查窗口是否存在
-                    IntPtr testHwnd = NativeMethods.FindWindowFuzzy(title);
-                    if (testHwnd == IntPtr.Zero)
-                    {
-                        Log("错误", $"未检测到脚本窗口 [{title}]，任务中止");
-                        task.Status = "启动失败";
-                        return;
-                    }
-                    Log("监控", "脚本窗口已确认存在，开始窗口存活监控");
+                    Log("监控", "开始窗口存活监控...");
 
                     while (DateTime.Now < endTime && !_stopRequested)
                     {
@@ -265,53 +285,27 @@ namespace TaskSchedulerApp.Services
                                 break;
                             }
                         }
-                        else
-                        {
-                            missingCounter = 0;
-                        }
+                        else missingCounter = 0;
 
-                        // 最后60秒截图
                         if (!hasTakenScreenshot && (endTime - DateTime.Now).TotalSeconds <= 60)
                         {
                             Log("任务", "任务进入最后一分钟，执行自动截图...");
                             TakeScreenshot(task);
                             hasTakenScreenshot = true;
                         }
-
                         await Task.Delay(1000);
                     }
                 }
                 else
                 {
-                    // =================== 模式二：进程名监控 ===================
-                    bool hasDetectedOnce = false;
+                    // --- 模式二：进程名监控 ---
                     int missingCounter = 0;
-                    int startupGraceSeconds = 10; // 给脚本和模拟器启动留出时间
-
-                    // 等待目标进程出现（防止启动慢导致误判）
-                    for (int i = 0; i < startupGraceSeconds; i++)
-                    {
-                        if (_stopRequested) break;
-                        var alive = GetAliveProcesses(task, null);
-                        if (alive.Count > 0)
-                        {
-                            hasDetectedOnce = true;
-                            Log("监控", "目标进程已出现，开始进程存活监控");
-                            break;
-                        }
-                        await Task.Delay(1000);
-                    }
-
-                    if (!hasDetectedOnce)
-                    {
-                        Log("错误", $"启动后 {startupGraceSeconds} 秒内未检测到任何目标进程，任务中止");
-                        task.Status = "启动失败";
-                        return;
-                    }
+                    Log("监控", "开始进程存活监控...");
 
                     while (DateTime.Now < endTime && !_stopRequested)
                     {
-                        var alive = GetAliveProcesses(task, null);
+                        // 传入 mainProcess 获取最准确的存活状态
+                        var alive = GetAliveProcesses(task, mainProcess);
                         bool currentlyAlive = alive.Count > 0;
 
                         if (!currentlyAlive)
@@ -323,10 +317,7 @@ namespace TaskSchedulerApp.Services
                                 break;
                             }
                         }
-                        else
-                        {
-                            missingCounter = 0;
-                        }
+                        else missingCounter = 0;
 
                         if (!hasTakenScreenshot && (endTime - DateTime.Now).TotalSeconds <= 60)
                         {
@@ -334,7 +325,6 @@ namespace TaskSchedulerApp.Services
                             TakeScreenshot(task);
                             hasTakenScreenshot = true;
                         }
-
                         await Task.Delay(1000);
                     }
                 }
