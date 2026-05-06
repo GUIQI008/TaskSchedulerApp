@@ -35,6 +35,9 @@ namespace TaskSchedulerApp.Core
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+
 
         [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
         public static extern int GetWindowTextLength(IntPtr hWnd);
@@ -50,6 +53,19 @@ namespace TaskSchedulerApp.Core
             {
                 if (IsWindowVisible(hWnd)) // 仅扫描可见窗口
                 {
+                    // 【新增拦截】：获取窗口的类名
+                    StringBuilder classNameSb = new StringBuilder(256);
+                    GetClassName(hWnd, classNameSb, classNameSb.Capacity);
+                    string className = classNameSb.ToString();
+
+                    // 过滤掉老式 CMD 窗口和 Win11 的 Terminal 窗口
+                    if (className.Equals("ConsoleWindowClass", StringComparison.OrdinalIgnoreCase) ||
+                        className.Equals("CASCADIA_HOSTING_WINDOW_CLASS", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true; // 是黑框框，直接跳过它！继续找下一个
+                    }
+
+                    // 开始比对标题
                     int length = GetWindowTextLength(hWnd);
                     if (length > 0)
                     {
@@ -61,11 +77,11 @@ namespace TaskSchedulerApp.Core
                         if (title.IndexOf(partialTitle, StringComparison.OrdinalIgnoreCase) >= 0)
                         {
                             foundHwnd = hWnd;
-                            return false; // 找到了，停止遍历
+                            return false; // 找到了真正的 UI 窗口，停止遍历
                         }
                     }
                 }
-                return true; // 没找到，继续遍历下一个
+                return true;
             }, IntPtr.Zero);
 
             return foundHwnd;

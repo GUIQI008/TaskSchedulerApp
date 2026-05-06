@@ -169,13 +169,18 @@ namespace TaskSchedulerApp.Services
                     Log("系统", $"启动脚本: {task.Path}");
                     try
                     {
-                        mainProcess = Process.Start(new ProcessStartInfo
+                        var startInfo = new ProcessStartInfo
                         {
                             FileName = task.Path,
                             Arguments = task.Arguments,
                             UseShellExecute = true,
-                            WorkingDirectory = Path.GetDirectoryName(task.Path) ?? ""
-                        });
+                            WorkingDirectory = Path.GetFullPath(Path.GetDirectoryName(task.Path) ?? ""),
+                             Verb = "runas"
+                        };
+
+                        // 某些特殊的软件依赖于系统的环境变量，我们可以尝试将其置为 null 让其继承系统
+                        Log("系统", $"启动脚本: {task.Path} (工作目录: {startInfo.WorkingDirectory})");
+                        mainProcess = Process.Start(startInfo);
 
                         if (mainProcess == null && !string.IsNullOrWhiteSpace(task.ProcessNames))
                         {
@@ -192,68 +197,82 @@ namespace TaskSchedulerApp.Services
                     catch (Exception ex) { Log("错误", $"脚本启动异常: {ex.Message}"); return; }
                 }
 
-                // 3. 核心时序控制：严格等待目标识别
+                // 3. 核心时序控制：严格等待目标识别 (自带连续3秒防抖机制)
                 bool isTargetReady = false;
 
                 if (!string.IsNullOrWhiteSpace(task.ScriptWindowTitle))
                 {
-                    Log("任务", $"严格等待脚本窗口加载: [{task.ScriptWindowTitle}]");
+                    Log("任务", $"严格等待脚本窗口加载: [{task.ScriptWindowTitle}] (需连续稳定 3 秒)");
                     isTargetReady = await WaitForWindow(task.ScriptWindowTitle, task.RecognitionTimeout);
                 }
                 else if (!string.IsNullOrWhiteSpace(task.ProcessNames) || mainProcess != null)
                 {
-                    Log("任务", "未配置窗口，严格等待脚本进程加载...");
-                    for (int i = 0; i < task.RecognitionTimeout; i++)
-                    {
-                        if (_stopRequested) return;
-                        var alive = GetAliveProcesses(task, mainProcess);
-                        if (alive.Count > 0) { isTargetReady = true; break; }
-                        await Task.Delay(1000);
-                    }
+                    Log("任务", "未配置窗口，严格等待脚本进程加载... (需连续稳定 3 秒)");
+                    isTargetReady = await WaitForProcess(task, mainProcess, task.RecognitionTimeout);
                 }
                 else { isTargetReady = true; }
 
                 if (!isTargetReady)
                 {
-                    Log("错误", $"在 {task.RecognitionTimeout} 秒内未识别到目标脚本，任务中止");
+                    Log("错误", $"在 {task.RecognitionTimeout} 秒内未识别到稳定目标，任务中止");
                     task.Status = "启动失败";
                     KillRelatedProcesses(task, mainProcess);
                     return;
                 }
 
-                Log("任务", "目标识别成功，等待 3 秒程序稳定...");
+                // ========================================================
+                // 窗口唤醒与强效置顶
+                // ========================================================
+                IntPtr targetHwnd = IntPtr.Zero;
+                if (!string.IsNullOrWhiteSpace(task.ScriptWindowTitle))
+                {
+                    targetHwnd = NativeMethods.FindWindowFuzzy(task.ScriptWindowTitle);
+                    if (targetHwnd != IntPtr.Zero)
+                    {
+                        Log("系统", "防遮挡：已将【脚本窗口】唤醒并强制置顶");
+                        if (NativeMethods.IsIconic(targetHwnd)) NativeMethods.ShowWindow(targetHwnd, NativeMethods.SW_RESTORE);
+                        NativeMethods.SetForegroundWindow(targetHwnd);
+                        NativeMethods.SetWindowPos(targetHwnd, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0, NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE);
+                    }
+                }
+
+                // 目标已完全确认且置顶，给它 3 秒的渲染缓冲时间
+                Log("任务", "目标已锁定并置于前台，等待最后 3 秒缓冲...");
                 await Task.Delay(3000);
 
-                // 执行宏录制动作
+                // ========================================================
+                // 执行宏录制动作 (带步进级防遮挡)
+                // ========================================================
                 if (task.Actions != null && task.Actions.Count > 0)
                 {
                     Log("操作", $"开始执行宏操作，共 {task.Actions.Count} 步...");
 
-                    IntPtr targetHwnd = IntPtr.Zero;
-                    if (!string.IsNullOrWhiteSpace(task.ScriptWindowTitle))
-                    {
-                        targetHwnd = NativeMethods.FindWindowFuzzy(task.ScriptWindowTitle);
-                        if (targetHwnd != IntPtr.Zero)
-                        {
-                            Log("系统", "防遮挡：已将【脚本窗口】强制置顶");
-                            if (NativeMethods.IsIconic(targetHwnd)) NativeMethods.ShowWindow(targetHwnd, NativeMethods.SW_RESTORE);
-                            NativeMethods.SetForegroundWindow(targetHwnd);
-                            NativeMethods.SetWindowPos(targetHwnd, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0, NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE);
-                        }
-                    }
-
                     foreach (var action in task.Actions)
                     {
                         if (_stopRequested) break;
+
                         if (action.DelayBefore > 0) await Task.Delay(action.DelayBefore);
 
-                        if (targetHwnd != IntPtr.Zero) NativeMethods.SetForegroundWindow(targetHwnd); // 点击前强校验
+                        // 【新增防护】：每次点击前，再次验证窗口是否还在！
+                        // 如果刚才那个窗口中途消失了（比如被别的弹窗顶掉），尝试重新抓取
+                        if (targetHwnd != IntPtr.Zero && !NativeMethods.IsWindowVisible(targetHwnd))
+                        {
+                            Log("警告", "目标窗口疑似消失，尝试重新捕获...");
+                            targetHwnd = NativeMethods.FindWindowFuzzy(task.ScriptWindowTitle);
+                        }
+
+                        if (targetHwnd != IntPtr.Zero)
+                        {
+                            NativeMethods.SetForegroundWindow(targetHwnd);
+                        }
+
                         InputSimulator.ExecuteAction(action);
                     }
 
+                    // 宏结束后恢复层级
                     if (targetHwnd != IntPtr.Zero)
                     {
-                        Log("系统", "防遮挡：已恢复正常层级");
+                        Log("系统", "防遮挡：宏结束，已恢复正常层级");
                         NativeMethods.SetWindowPos(targetHwnd, NativeMethods.HWND_NOTOPMOST, 0, 0, 0, 0, NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE);
                     }
                     Log("操作", "宏操作执行完毕！");
@@ -329,18 +348,9 @@ namespace TaskSchedulerApp.Services
                     }
                 }
 
-                // 保底截图
-                if (!hasTakenScreenshot && !_stopRequested)
-                {
-                    Log("任务", "执行最终检查截图...");
-                    TakeScreenshot(task);
-                }
-
-                task.Status = _stopRequested ? "手动停止" : "已完成";
-                KillRelatedProcesses(task, null); 
-                await SendBark(task.Name, task.Status);
-
+                // ========================================================
                 // 5. 结束收尾
+                // ========================================================
                 if (!hasTakenScreenshot && !_stopRequested)
                 {
                     Log("任务", "执行最终检查截图...");
@@ -348,16 +358,20 @@ namespace TaskSchedulerApp.Services
                 }
 
                 task.Status = _stopRequested ? "手动停止" : "已完成";
+
+                // 注意这里，杀进程并发推送
                 KillRelatedProcesses(task, mainProcess);
                 await SendBark(task.Name, task.Status);
             }
             finally
             {
+                // 兜底机制，无论正常结束还是发生异常，确保进程被彻底清理
                 KillRelatedProcesses(task, mainProcess);
             }
         }
 
         // 辅助检测窗口稳定的方法
+        // 辅助检测窗口稳定的方法 (连续 3 秒才算数)
         private async Task<bool> WaitForWindow(string title, int timeoutSeconds)
         {
             int consecutiveCount = 0;
@@ -368,9 +382,28 @@ namespace TaskSchedulerApp.Services
                 if (hwnd != IntPtr.Zero && NativeMethods.IsWindowVisible(hwnd))
                 {
                     consecutiveCount++;
-                    if (consecutiveCount >= 2) return true; // 连续2秒找到视为稳定
+                    if (consecutiveCount >= 3) return true; // 【已恢复】：必须连续 3 秒找到才算稳定
                 }
-                else consecutiveCount = 0;
+                else consecutiveCount = 0; // 只要断了一次，重新计数！
+                await Task.Delay(1000);
+            }
+            return false;
+        }
+
+        // 新增：辅助检测进程稳定的方法 (连续 3 秒才算数)
+        private async Task<bool> WaitForProcess(TaskItem task, Process? mainProcess, int timeoutSeconds)
+        {
+            int consecutiveCount = 0;
+            for (int i = 0; i < timeoutSeconds; i++)
+            {
+                if (_stopRequested) return false;
+                var alive = GetAliveProcesses(task, mainProcess);
+                if (alive.Count > 0)
+                {
+                    consecutiveCount++;
+                    if (consecutiveCount >= 3) return true; // 必须连续 3 秒存活才算稳定
+                }
+                else consecutiveCount = 0; // 断了重计
                 await Task.Delay(1000);
             }
             return false;
