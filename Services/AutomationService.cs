@@ -240,9 +240,7 @@ namespace TaskSchedulerApp.Services
                 Log("任务", "目标已锁定并置于前台，等待最后 3 秒缓冲...");
                 await Task.Delay(3000);
 
-                // ========================================================
                 // 执行宏录制动作 (带步进级防遮挡)
-                // ========================================================
                 if (task.Actions != null && task.Actions.Count > 0)
                 {
                     Log("操作", $"开始执行宏操作，共 {task.Actions.Count} 步...");
@@ -253,17 +251,15 @@ namespace TaskSchedulerApp.Services
 
                         if (action.DelayBefore > 0) await Task.Delay(action.DelayBefore);
 
-                        // 【新增防护】：每次点击前，再次验证窗口是否还在！
-                        // 如果刚才那个窗口中途消失了（比如被别的弹窗顶掉），尝试重新抓取
+                        // 如果中途窗口消失了，我们才去重新抓取并置顶（不要每次都去调用置顶！）
                         if (targetHwnd != IntPtr.Zero && !NativeMethods.IsWindowVisible(targetHwnd))
                         {
                             Log("警告", "目标窗口疑似消失，尝试重新捕获...");
                             targetHwnd = NativeMethods.FindWindowFuzzy(task.ScriptWindowTitle);
-                        }
-
-                        if (targetHwnd != IntPtr.Zero)
-                        {
-                            NativeMethods.SetForegroundWindow(targetHwnd);
+                            if (targetHwnd != IntPtr.Zero)
+                            {
+                                NativeMethods.SetForegroundWindow(targetHwnd);
+                            }
                         }
 
                         InputSimulator.ExecuteAction(action);
